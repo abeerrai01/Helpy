@@ -1036,7 +1036,7 @@ export class CredentialsManager {
     }
 
     public getAiResponseLanguage(): string {
-        return this.credentials.aiResponseLanguage || 'auto';
+        return this.credentials.aiResponseLanguage || 'English';
     }
     public getDefaultModel(): string {
         // Default to Flash-Lite: ~0.65s first-token vs ~2.3s for full Flash on

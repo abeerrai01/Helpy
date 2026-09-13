@@ -7826,7 +7826,20 @@ Provide only the answer, nothing else.`;
     manualSubmitInFlightRef.current = true;
     lastManualSubmitRef.current = { text: userText, atMs: nowMs };
 
-    const currentAttachments = attachedContext;
+    let currentAttachments = attachedContext;
+    if (
+      currentAttachments.length === 0 &&
+      /\b(screen|screenshot|code|question|problem|solve|this|look|error|console|window)\b/i.test(userText)
+    ) {
+      try {
+        const shot = await window.electronAPI?.takeScreenshot?.();
+        if (shot && shot.path) {
+          currentAttachments = [{ path: shot.path, preview: shot.preview || '' }];
+        }
+      } catch (err) {
+        console.warn('Auto-screenshot on typed submit failed:', err);
+      }
+    }
 
     // Clear inputs immediately
     setInputValue('');

@@ -524,7 +524,7 @@ export class LLMHelper {
   private codexCliConfig: CodexCliConfig = DEFAULT_CODEX_CLI_CONFIG;
   private knowledgeOrchestrator: any = null;
   private negotiationCoachingHandler: ((payload: unknown) => void) | null = null;
-  private aiResponseLanguage: string = 'auto';
+  private aiResponseLanguage: string = 'English';
   private sttLanguage: string = 'english-us';
   private nativelyKey: string | null = null;
   // Last server-chosen model reported by the Natively API SSE stream (e.g.
