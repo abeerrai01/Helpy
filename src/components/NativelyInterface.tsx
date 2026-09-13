@@ -1023,7 +1023,7 @@ const MessageRow = React.memo(
         ? 'max-w-[85%] p-0'
         : 'max-w-[85%] px-4 py-3';
     return (
-      <div className="w-full min-w-0" {...(isCodeMsg ? { 'data-code-msg': 'true' } : {})}>
+      <div className="w-full min-w-0" data-msg-id={msg.id} {...(isCodeMsg ? { 'data-code-msg': 'true' } : {})}>
         <div
           className={`flex min-w-0 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
         >
@@ -4001,6 +4001,44 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     if (c) c.scrollTo({ top: c.scrollHeight, behavior: 'smooth' });
   }, [setJumpToLatestVisible, clearScrollHeadroom]);
 
+  const scrollToTopOfMessage = useCallback((msgId?: string) => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    // When called without a specific msgId (shortcut or auto-scroll after
+    // response complete), jump instantly to the very top of the scroll area.
+    if (!msgId) {
+      container.scrollTop = 0;
+      lastScrollTopRef.current = 0;
+      wasAtBottomRef.current = false;
+      autoScrollSuppressedForMsgIdRef.current = 'user-scroll';
+      return;
+    }
+    let targetEl: HTMLElement | null = container.querySelector(`[data-msg-id="${msgId}"]`);
+    if (!targetEl) {
+      const allRows = container.querySelectorAll('[data-msg-id]');
+      if (allRows.length > 0) {
+        for (let i = allRows.length - 1; i >= 0; i--) {
+          const row = allRows[i] as HTMLElement;
+          if (!row.querySelector('.justify-end')) {
+            targetEl = row;
+            break;
+          }
+        }
+        if (!targetEl) targetEl = allRows[allRows.length - 1] as HTMLElement;
+      }
+    }
+    if (targetEl) {
+      const containerRect = container.getBoundingClientRect();
+      const targetRect = targetEl.getBoundingClientRect();
+      const targetTop = container.scrollTop + (targetRect.top - containerRect.top) - 12;
+      // Use instant scroll to avoid being overridden by streaming RAF
+      container.scrollTop = Math.max(0, targetTop);
+      lastScrollTopRef.current = container.scrollTop;
+      wasAtBottomRef.current = false;
+      autoScrollSuppressedForMsgIdRef.current = msgId;
+    }
+  }, []);
+
   // (Re)attach the scroll listener whenever the scroll container mounts.
   // The OUTER shell (the always-mounted `data-shell-root` motion.div) now
   // stays in the DOM across Cmd+B so scrollTop survives, but the scroll
@@ -5223,6 +5261,10 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         activeDirectAssistRef.current = null;
       }
       setMessages((prev) => commitStreamingFlush(prev, pending.msgId, pending.text));
+      wasAtBottomRef.current = false;
+      setTimeout(() => {
+        scrollToTopOfMessage(pending.msgId);
+      }, 50);
     }, safetyNetMs);
     ensureRevealTicker(msgId);
   }, [ensureRevealTicker, computeSafetyNetMs]);
@@ -5731,6 +5773,10 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
                 }
               : message,
           ));
+          wasAtBottomRef.current = false;
+          setTimeout(() => {
+            scrollToTopOfMessage(active.placeholderId);
+          }, 50);
         }
         return;
       }
@@ -8698,6 +8744,12 @@ Provide only the answer, nothing else.`;
         downHeld = true;
         recomputeDirection();
         startScrollLoop();
+      } else if (isShortcutPressed(e, 'scrollTop')) {
+        e.preventDefault();
+        scrollToTopOfMessage();
+      } else if (isShortcutPressed(e, 'scrollBottom')) {
+        e.preventDefault();
+        handleJumpToLatest();
       } else if (isShortcutPressed(e, 'moveWindowUp') || isShortcutPressed(e, 'moveWindowDown')) {
         // Prevent default scrolling when moving window
         e.preventDefault();
@@ -8909,9 +8961,9 @@ Provide only the answer, nothing else.`;
   } | null>(null);
 
   useEffect(() => {
-    const KICK_VELOCITY = 900; // px/s added per press
-    const TERMINAL_VELOCITY = 3200; // px/s clamp
-    const FRICTION_HALF_LIFE = 0.16; // seconds for velocity to halve
+    const KICK_VELOCITY = 1800; // px/s added per press
+    const TERMINAL_VELOCITY = 4800; // px/s clamp
+    const FRICTION_HALF_LIFE = 0.20; // seconds for velocity to halve
     const MIN_VELOCITY = 8; // px/s — snap to zero below
     const MAX_FRAME_DT = 0.05; // clamp for tab-throttle hiccups
 
@@ -9048,6 +9100,8 @@ Provide only the answer, nothing else.`;
       else if (action === 'brainstorm') handlers.handleBrainstorm();
       else if (action === 'scrollUp') inertialScrollRef.current?.kick('vert', -1);
       else if (action === 'scrollDown') inertialScrollRef.current?.kick('vert', 1);
+      else if (action === 'scrollTop') scrollToTopOfMessage();
+      else if (action === 'scrollBottom') handleJumpToLatest();
       else if (action === 'scrollLeft') inertialScrollRef.current?.kick('horiz', -1);
       else if (action === 'scrollRight') inertialScrollRef.current?.kick('horiz', 1);
       else if (action === 'focusInput') {

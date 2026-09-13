@@ -16,6 +16,8 @@ export interface ShortcutConfig {
     recap: string[];
     scrollUp: string[];
     scrollDown: string[];
+    scrollTop: string[];
+    scrollBottom: string[];
     scrollLeft: string[];
     scrollRight: string[];
     focusInput: string[];
@@ -51,6 +53,8 @@ function buildDefaultShortcuts(): ShortcutConfig {
         recap: [],
         scrollUp: [mod, '↑'],
         scrollDown: [mod, '↓'],
+        scrollTop: [mod, shift, 'Home'],
+        scrollBottom: [mod, shift, 'End'],
         scrollLeft: [mod, isMac ? '⌥' : 'Alt', '←'],
         scrollRight: [mod, isMac ? '⌥' : 'Alt', '→'],
         focusInput: [mod, shift, 'Space'],
@@ -99,6 +103,8 @@ const BACKEND_ID_TO_ACTION: Partial<Record<string, keyof ShortcutConfig>> = {
     'chat:recap': 'recap',
     'chat:scrollUp': 'scrollUp',
     'chat:scrollDown': 'scrollDown',
+    'chat:scrollTop': 'scrollTop',
+    'chat:scrollBottom': 'scrollBottom',
     'chat:scrollLeft': 'scrollLeft',
     'chat:scrollRight': 'scrollRight',
     'chat:focusInput': 'focusInput',
@@ -277,6 +283,8 @@ export const useShortcuts = () => {
             case 'recap': backendId = 'chat:recap'; break;
             case 'scrollUp': backendId = 'chat:scrollUp'; break;
             case 'scrollDown': backendId = 'chat:scrollDown'; break;
+            case 'scrollTop': backendId = 'chat:scrollTop'; break;
+            case 'scrollBottom': backendId = 'chat:scrollBottom'; break;
             case 'scrollLeft': backendId = 'chat:scrollLeft'; break;
             case 'scrollRight': backendId = 'chat:scrollRight'; break;
             case 'focusInput': backendId = 'chat:focusInput'; break;
