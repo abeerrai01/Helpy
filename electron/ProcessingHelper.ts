@@ -53,12 +53,23 @@ export class ProcessingHelper {
       let deepseekApiKey = app.isPackaged ? undefined : process.env.DEEPSEEK_API_KEY
       let nvidiaNimApiKey = app.isPackaged ? undefined : process.env.NVIDIA_NIM_API_KEY
 
+      // Fallback Gemini API keys from environment (dev mode only)
+      let geminiFallbackKeys: string[] = []
+      if (!app.isPackaged) {
+        for (const n of ['GEMINI_API_KEY_2', 'GEMINI_API_KEY_3', 'GEMINI_API_KEY_4', 'GEMINI_API_KEY_5', 'GEMINI_API_KEY_6', 'GEMINI_FALLBACK_API_KEY']) {
+          const val = (process.env[n] || '').trim()
+          if (val && !geminiFallbackKeys.includes(val) && val !== apiKey) {
+            geminiFallbackKeys.push(val)
+          }
+        }
+      }
+
       // Allow initializing without key (will be loaded in loadStoredCredentials or via Settings)
-      if (!apiKey) {
+      if (!apiKey && geminiFallbackKeys.length === 0) {
         console.warn("[ProcessingHelper] GEMINI_API_KEY not found in env (or running packaged). Will try CredentialsManager after ready.")
       }
 
-      this.llmHelper = new LLMHelper(apiKey, false, undefined, undefined, groqApiKey, openaiApiKey, claudeApiKey, deepseekApiKey, nvidiaNimApiKey)
+      this.llmHelper = new LLMHelper(apiKey, false, undefined, undefined, groqApiKey, openaiApiKey, claudeApiKey, deepseekApiKey, nvidiaNimApiKey, geminiFallbackKeys)
     }
   }
 
@@ -70,6 +81,7 @@ export class ProcessingHelper {
     const credManager = CredentialsManager.getInstance();
 
     const geminiKey = credManager.getGeminiApiKey();
+    const geminiFallbackKeys = credManager.getGeminiFallbackApiKeys?.() || [];
     const groqKey = credManager.getGroqApiKey();
     const openaiKey = credManager.getOpenaiApiKey();
     const claudeKey = credManager.getClaudeApiKey();
@@ -79,6 +91,11 @@ export class ProcessingHelper {
     if (geminiKey) {
       console.log("[ProcessingHelper] Loading stored Gemini API Key from CredentialsManager");
       this.llmHelper.setApiKey(geminiKey);
+    }
+
+    if (geminiFallbackKeys.length > 0) {
+      console.log(`[ProcessingHelper] Loading ${geminiFallbackKeys.length} stored Gemini Fallback API Key(s) from CredentialsManager`);
+      this.llmHelper.setGeminiFallbackApiKeys(geminiFallbackKeys);
     }
 
     if (groqKey) {

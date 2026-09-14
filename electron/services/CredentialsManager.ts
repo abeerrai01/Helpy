@@ -99,6 +99,8 @@ export type PreferredModelProvider = 'gemini' | 'groq' | 'openai' | 'claude' | '
 
 export interface StoredCredentials {
     geminiApiKey?: string;
+    geminiFallbackApiKey?: string;
+    geminiFallbackApiKeys?: string[];
     groqApiKey?: string;
     openaiApiKey?: string;
     claudeApiKey?: string;
@@ -802,6 +804,27 @@ export class CredentialsManager {
         return this.storedOrEnv(this.credentials.geminiApiKey, 'GEMINI_API_KEY');
     }
 
+    public getGeminiFallbackApiKey(): string | undefined {
+        return this.getGeminiFallbackApiKeys()[0];
+    }
+
+    public getGeminiFallbackApiKeys(): string[] {
+        const pool: string[] = [];
+        const add = (k?: string) => {
+            const v = (k || '').trim();
+            if (v && !this.isPlaceholderKey(v) && !pool.includes(v)) pool.push(v);
+        };
+        for (const k of this.credentials.geminiFallbackApiKeys || []) add(k);
+        add(this.credentials.geminiFallbackApiKey);
+        if (!app.isPackaged) {
+            for (const n of ['GEMINI_API_KEY_2', 'GEMINI_API_KEY_3', 'GEMINI_API_KEY_4', 'GEMINI_API_KEY_5', 'GEMINI_API_KEY_6', 'GEMINI_FALLBACK_API_KEY', 'GOOGLE_API_KEY_2', 'GOOGLE_API_KEY_3']) {
+                add(process.env[n]);
+            }
+        }
+        const primary = this.getGeminiApiKey();
+        return pool.filter(k => k !== primary);
+    }
+
     public getGroqApiKey(): string | undefined {
         return this.storedOrEnv(this.credentials.groqApiKey, 'GROQ_API_KEY');
     }
@@ -1234,6 +1257,21 @@ export class CredentialsManager {
         this.credentials.geminiApiKey = trimmed || undefined;
         this.saveCredentials();
         console.log('[CredentialsManager] Gemini API Key updated');
+    }
+
+    public setGeminiFallbackApiKey(key: string): void {
+        if (this.refuseWriteWhileDegraded('set gemini fallback api key')) return;
+        const trimmed = (key || '').trim();
+        this.credentials.geminiFallbackApiKey = trimmed || undefined;
+        this.saveCredentials();
+        console.log('[CredentialsManager] Gemini Fallback API Key updated');
+    }
+
+    public setGeminiFallbackApiKeys(keys: string[]): void {
+        if (this.refuseWriteWhileDegraded('set gemini fallback api keys')) return;
+        this.credentials.geminiFallbackApiKeys = (keys || []).map(k => (k || '').trim()).filter(Boolean);
+        this.saveCredentials();
+        console.log('[CredentialsManager] Gemini Fallback API Keys updated');
     }
 
     public setGroqApiKey(key: string): void {

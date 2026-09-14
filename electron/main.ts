@@ -2006,6 +2006,8 @@ export class AppState {
           actionId === 'chat:dynamicAction4' ||
           actionId === 'chat:scrollUp' ||
           actionId === 'chat:scrollDown' ||
+          actionId === 'chat:scrollTop' ||
+          actionId === 'chat:scrollBottom' ||
           actionId === 'chat:scrollLeft' ||
           actionId === 'chat:scrollRight'
         ) {
@@ -2019,6 +2021,8 @@ export class AppState {
             'chat:dynamicAction4': 'dynamicAction4',
             'chat:scrollUp': 'scrollUp',
             'chat:scrollDown': 'scrollDown',
+            'chat:scrollTop': 'scrollTop',
+            'chat:scrollBottom': 'scrollBottom',
             'chat:scrollLeft': 'scrollLeft',
             'chat:scrollRight': 'scrollRight',
           };
@@ -8477,7 +8481,7 @@ async function initializeApp() {
       const ses = electronSession.defaultSession;
 
       // Pre-check — gates whether the request is even forwarded to the OS.
-      ses.setPermissionCheckHandler((_wc, permission) => {
+      ses.setPermissionCheckHandler((_wc: any, permission: any) => {
         if (permission === 'media' || permission === 'microphone' || permission === 'camera') {
           return true;
         }
@@ -8485,7 +8489,7 @@ async function initializeApp() {
       });
 
       // Request handler — called when getUserMedia is invoked by a renderer.
-      ses.setPermissionRequestHandler((_wc, permission, callback) => {
+      ses.setPermissionRequestHandler((_wc: any, permission: any, callback: any) => {
         if (permission === 'media' || permission === 'microphone' || permission === 'camera') {
           callback(true);
           return;

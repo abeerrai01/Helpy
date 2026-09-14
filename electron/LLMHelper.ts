@@ -473,6 +473,8 @@ export class LLMHelper {
     return 'No AI provider configured. Please add at least one API key in Settings.';
   }
   private apiKey: string | null = null
+  private fallbackApiKeys: string[] = []
+  private fallbackClients: GoogleGenAI[] = []
   private groqApiKey: string | null = null
   private openaiApiKey: string | null = null
   private claudeApiKey: string | null = null
@@ -1176,7 +1178,7 @@ export class LLMHelper {
     console.warn(`[ScopeFallback] ${scope} denied; Ollama unavailable, omitting from context`);
   }
 
-  constructor(apiKey?: string, useOllama: boolean = false, ollamaModel?: string, ollamaUrl?: string, groqApiKey?: string, openaiApiKey?: string, claudeApiKey?: string, deepseekApiKey?: string, nvidiaNimApiKey?: string) {
+  constructor(apiKey?: string, useOllama: boolean = false, ollamaModel?: string, ollamaUrl?: string, groqApiKey?: string, openaiApiKey?: string, claudeApiKey?: string, deepseekApiKey?: string, nvidiaNimApiKey?: string, geminiFallbackApiKeys?: string[] | string) {
     this.useOllama = useOllama
 
     // Initialize rate limiters
@@ -1227,6 +1229,11 @@ export class LLMHelper {
     }
     if (nvidiaNimApiKey) this.setNvidiaNimApiKey(nvidiaNimApiKey)
 
+    if (geminiFallbackApiKeys) {
+      const keys = Array.isArray(geminiFallbackApiKeys) ? geminiFallbackApiKeys : [geminiFallbackApiKeys];
+      this.setGeminiFallbackApiKeys(keys);
+    }
+
     if (useOllama) {
       this.ollamaUrl = ollamaUrl || "http://127.0.0.1:11434"
       this.ollamaModel = ollamaModel || ""
@@ -1273,6 +1280,53 @@ export class LLMHelper {
       httpOptions: { apiVersion: "v1alpha" }
     })
     console.log("[LLMHelper] Gemini API Key updated.");
+  }
+
+  public setGeminiFallbackApiKey(apiKey: string) {
+    this.setGeminiFallbackApiKeys(apiKey ? [apiKey] : []);
+  }
+
+  public setGeminiFallbackApiKeys(keys: string[]) {
+    this.fallbackClients = [];
+    this.fallbackApiKeys = [];
+    for (const key of keys) {
+      const trimmed = (key || '').trim();
+      if (trimmed && !this.fallbackApiKeys.includes(trimmed)) {
+        this.fallbackApiKeys.push(trimmed);
+        this.fallbackClients.push(new GoogleGenAI({
+          apiKey: trimmed,
+          httpOptions: { apiVersion: "v1alpha" }
+        }));
+      }
+    }
+    if (this.fallbackClients.length > 0) {
+      console.log(`[LLMHelper] ${this.fallbackClients.length} Gemini Fallback API Key(s) configured.`);
+    }
+  }
+
+  public getGeminiFallbackClientCount(): number {
+    return this.fallbackClients.length;
+  }
+
+  public async executeGeminiGenerateContent(request: any, clientOverride?: GoogleGenAI): Promise<any> {
+    const clientsToTry = clientOverride
+      ? [clientOverride]
+      : [...(this.client ? [this.client] : []), ...this.fallbackClients.filter(c => c !== this.client)];
+    if (clientsToTry.length === 0) throw new Error("Gemini client not initialized");
+
+    let lastErr: any = null;
+    for (let i = 0; i < clientsToTry.length; i++) {
+      try {
+        await this.rateLimiters.gemini.acquire();
+        return await clientsToTry[i].models.generateContent(request);
+      } catch (err: any) {
+        lastErr = err;
+        if (i < clientsToTry.length - 1) {
+          console.warn(`[LLMHelper] Gemini client #${i + 1} generateContent failed (${err?.message}), falling back to next key...`);
+        }
+      }
+    }
+    throw lastErr;
   }
 
   // Thinking-mode models burn num_predict in <think> blocks unless `think:false` is sent.
@@ -2098,7 +2152,7 @@ export class LLMHelper {
         open: (sig) => this.streamWithNatively(userContent, finalSystemPrompt, undefined, sig, INTERACTIVE_CONNECT_TIMEOUT_MS),
       });
     }
-    if (!skip.has('gemini_flash') && this.client) {
+    if (!skip.has('gemini_flash') && (this.client || this.fallbackClients.length > 0)) {
       spares.push({
         id: 'gemini_flash', name: 'Gemini Flash', isLocal: false, priority: prio++,
         open: (sig) => this.streamWithGeminiModel(userContent, GEMINI_FLASH_MODEL, undefined, finalSystemPrompt, sig, thinkingBudget),
@@ -2720,10 +2774,8 @@ export class LLMHelper {
    */
   public async generateWithFlash(contents: any[]): Promise<string> {
     if (this.isLocalOnlyMode) throw new Error("Cloud providers disabled in local-only mode");
-    if (!this.client) throw new Error("Gemini client not initialized")
+    if (!this.client && this.fallbackClients.length === 0) throw new Error("Gemini client not initialized");
 
-    await this.rateLimiters.gemini.acquire();
-    // console.log(`[LLMHelper] Calling ${GEMINI_FLASH_MODEL}...`)
     const request = {
       model: GEMINI_FLASH_MODEL,
       contents: contents,
@@ -2735,8 +2787,8 @@ export class LLMHelper {
     require('./llm/providerPayloadCapture').captureProviderPayload({
       provider: 'gemini', classification: 'sdk_request_object_before_serialization', payload: request,
     });
-    const response = await this.client.models.generateContent(request)
-    return response.text || ""
+    const response = await this.executeGeminiGenerateContent(request);
+    return response.text || "";
   }
 
   /**
@@ -4243,12 +4295,10 @@ let isMultimodal = !!(imagePaths?.length);
    * is down (the controller's deadline bounds the total wait either way).
    */
   public async generateJudgeVerdict(message: string): Promise<string> {
-    if (this.client) {
+    if (this.client || this.fallbackClients.length > 0) {
       for (const modelId of [GEMINI_FLASH_LITE_MODEL, GEMINI_FLASH_MODEL]) {
         try {
-          await this.rateLimiters.gemini.acquire();
-          // @ts-ignore
-          const res = await this.client.models.generateContent({
+          const res = await this.executeGeminiGenerateContent({
             model: modelId,
             contents: [{ role: 'user', parts: [{ text: message }] }],
             config: { maxOutputTokens: 256, temperature: 0, responseMimeType: 'application/json' },
@@ -4314,15 +4364,13 @@ let isMultimodal = !!(imagePaths?.length);
     // on the real extraction code it gave no quality gain over flash-lite at ~4×
     // latency. MiniMax is likewise excluded (it under-extracts). This is the
     // flash-lite→3.7-flash extraction pattern.
-    if (this.client) {
+    if (this.client || this.fallbackClients.length > 0) {
       const buildGeminiProvider = (modelId: string): ProviderAttempt => ({
         name: `Gemini (${modelId})`,
         execute: async () => {
           // Call the API directly with the target model instead of touching shared state.
-          await this.rateLimiters.gemini.acquire();
           const response = await this.withRetry(async () => {
-            // @ts-ignore
-            const res = await this.client!.models.generateContent({
+            const res = await this.executeGeminiGenerateContent({
               model: modelId,
               contents: [{ role: 'user', parts: [{ text: message }] }],
               config: { maxOutputTokens: MAX_OUTPUT_TOKENS, temperature: 0.4 }
@@ -8562,7 +8610,7 @@ let isMultimodal = !!(imagePaths?.length);
     }
 
     // 4. Gemini Routing & Fallback
-    if (this.client) {
+    if (this.client || this.fallbackClients.length > 0) {
       // CACHE: pass system prompt via `systemInstruction` so it is structurally
       // separated from per-request user content. Static content also leads in
       // `userContent` is not the case — userContent is dynamic — so the system
@@ -9645,9 +9693,10 @@ let isMultimodal = !!(imagePaths?.length);
    *    haven't migrated. Static content leads that string so implicit caching
    *    still applies.
    */
-  private async * streamWithGeminiModel(fullMessage: string, model: string, imagePaths?: string[], systemInstruction?: string, abortSignal?: AbortSignal, thinkingBudget: number = INTERACTIVE_THINKING_BUDGET): AsyncGenerator<string, void, unknown> {
+  private async * streamWithGeminiModel(fullMessage: string, model: string, imagePaths?: string[], systemInstruction?: string, abortSignal?: AbortSignal, thinkingBudget: number = INTERACTIVE_THINKING_BUDGET, clientOverride?: GoogleGenAI): AsyncGenerator<string, void, unknown> {
     if (this.isLocalOnlyMode) throw new Error("Cloud providers disabled in local-only mode");
-    if (!this.client) throw new Error("Gemini client not initialized");
+    const activeClient = clientOverride || this.client || this.fallbackClients[0];
+    if (!activeClient) throw new Error("Gemini client not initialized");
     this.assertOutboundScopes('gemini', fullMessage, imagePaths);
 
     await this.rateLimiters.gemini.acquire();
@@ -9683,7 +9732,7 @@ let isMultimodal = !!(imagePaths?.length);
     // dead time before any token when create ran inline. On a miss this request
     // streams immediately with `systemInstruction` (implicit caching still helps).
     const cacheName = systemInstruction
-      ? this.geminiPromptCache.getCachedOrWarmInBackground(this.client, model, systemInstruction)
+      ? this.geminiPromptCache.getCachedOrWarmInBackground(activeClient, model, systemInstruction)
       : null;
     if (_gmeasure) console.log(`[Gemini.stream] +${Date.now() - _gt0}ms  cache resolve done (cacheHit=${Boolean(cacheName)}, sysPrompt=${systemInstruction?.length ?? 0}c, model=${model})`);
 
@@ -9729,7 +9778,7 @@ let isMultimodal = !!(imagePaths?.length);
       require('./llm/providerPayloadCapture').captureProviderPayload({
         provider: 'gemini', classification: 'sdk_request_object_before_serialization', payload: request,
       });
-      streamResult = await this.client.models.generateContentStream(request);
+      streamResult = await activeClient.models.generateContentStream(request);
     } catch (err: any) {
       if (isAbortError(err)) return;
       // The cache may have expired between getOrCreate() and this call. If we
@@ -9743,7 +9792,7 @@ let isMultimodal = !!(imagePaths?.length);
           require('./llm/providerPayloadCapture').captureProviderPayload({
             provider: 'gemini', classification: 'sdk_request_object_before_serialization', payload: retryRequest,
           });
-          streamResult = await this.client.models.generateContentStream(retryRequest);
+          streamResult = await activeClient.models.generateContentStream(retryRequest);
         } catch (retryErr: any) {
           if (isAbortError(retryErr)) return;
           throw retryErr;
@@ -9811,36 +9860,63 @@ let isMultimodal = !!(imagePaths?.length);
    * → minimal at budget≤0, pro → forced 'low').
    */
   private async * streamGeminiTextCascade(fullMessage: string, imagePaths: string[] | undefined, systemInstruction: string | undefined, abortSignal: AbortSignal | undefined, thinkingBudget: number = INTERACTIVE_THINKING_BUDGET): AsyncGenerator<string, void, unknown> {
-    if (!this.client) throw new Error("Gemini client not initialized");
-
-    // Full ladder, cheapest → most capable. priority encodes the ladder order.
-    const ladder: TextStreamProvider[] = [
-      { id: 'gemini_flash_lite', name: 'Gemini Flash-Lite', isLocal: false, priority: 0,
-        open: (sig) => this.streamWithGeminiModel(fullMessage, GEMINI_FLASH_LITE_MODEL, imagePaths, systemInstruction, sig, thinkingBudget) },
-      { id: 'gemini_flash', name: 'Gemini Flash', isLocal: false, priority: 1,
-        open: (sig) => this.streamWithGeminiModel(fullMessage, GEMINI_FLASH_MODEL, imagePaths, systemInstruction, sig, thinkingBudget) },
-      { id: 'gemini_pro', name: 'Gemini Pro', isLocal: false, priority: 2,
-        open: (sig) => this.streamWithGeminiModel(fullMessage, GEMINI_PRO_MODEL, imagePaths, systemInstruction, sig, thinkingBudget) },
+    const clientsToTry = [
+      ...(this.client ? [this.client] : []),
+      ...this.fallbackClients.filter(c => c !== this.client),
     ];
+    if (clientsToTry.length === 0) throw new Error("Gemini client not initialized");
 
-    // Honor the selected Gemini model as the starting rung; fall forward only.
-    // Non-Gemini selections (fell through to Gemini) and flash-lite start at 0.
-    const startIndex =
-      this.currentModelId === GEMINI_PRO_MODEL ? 2 :
-      this.currentModelId === GEMINI_FLASH_MODEL ? 1 :
-      0;
-    const providers = ladder.slice(startIndex);
+    let lastError: any = null;
+    let yieldedAny = false;
 
-    // All rungs share ONE Gemini API key. A permanent key-level failure (expired
-    // / invalid key, no credits, billing, 401/403) on one rung means every other
-    // rung fails identically — so abort the whole Gemini cascade immediately and
-    // let the caller fall through to a DIFFERENT provider, instead of burning
-    // latency on two more doomed calls. Transient errors (429 rate, 503 overload,
-    // timeout, 5xx) still walk lite→flash→pro normally.
-    const cfg: VisionFallbackConfig = { ...DEFAULT_TEXT_FALLBACK_CONFIG, stopChainOnError: isPermanentKeyError };
+    for (let i = 0; i < clientsToTry.length; i++) {
+      const activeClient = clientsToTry[i];
+      try {
+        // Full ladder, cheapest → most capable. priority encodes the ladder order.
+        const ladder: TextStreamProvider[] = [
+          { id: 'gemini_flash_lite', name: 'Gemini Flash-Lite', isLocal: false, priority: 0,
+            open: (sig) => this.streamWithGeminiModel(fullMessage, GEMINI_FLASH_LITE_MODEL, imagePaths, systemInstruction, sig, thinkingBudget, activeClient) },
+          { id: 'gemini_flash', name: 'Gemini Flash', isLocal: false, priority: 1,
+            open: (sig) => this.streamWithGeminiModel(fullMessage, GEMINI_FLASH_MODEL, imagePaths, systemInstruction, sig, thinkingBudget, activeClient) },
+          { id: 'gemini_pro', name: 'Gemini Pro', isLocal: false, priority: 2,
+            open: (sig) => this.streamWithGeminiModel(fullMessage, GEMINI_PRO_MODEL, imagePaths, systemInstruction, sig, thinkingBudget, activeClient) },
+        ];
 
-    const ordered = orderTextByHealth(providers, this.textHealth, Date.now());
-    yield* runStreamingTextFallback(ordered, this.textHealth, cfg, {}, abortSignal);
+        // Honor the selected Gemini model as the starting rung; fall forward only.
+        // Non-Gemini selections (fell through to Gemini) and flash-lite start at 0.
+        const startIndex =
+          this.currentModelId === GEMINI_PRO_MODEL ? 2 :
+          this.currentModelId === GEMINI_FLASH_MODEL ? 1 :
+          0;
+        const providers = ladder.slice(startIndex);
+
+        // All rungs share ONE Gemini API key. A permanent key-level failure (expired
+        // / invalid key, no credits, billing, 401/403) on one rung means every other
+        // rung fails identically — so abort the whole Gemini cascade immediately and
+        // let the caller fall through to a DIFFERENT provider, instead of burning
+        // latency on two more doomed calls. Transient errors (429 rate, 503 overload,
+        // timeout, 5xx) still walk lite→flash→pro normally.
+        const cfg: VisionFallbackConfig = { ...DEFAULT_TEXT_FALLBACK_CONFIG, stopChainOnError: isPermanentKeyError };
+
+        const ordered = orderTextByHealth(providers, this.textHealth, Date.now());
+        for await (const chunk of runStreamingTextFallback(ordered, this.textHealth, cfg, {}, abortSignal)) {
+          yieldedAny = true;
+          yield chunk;
+        }
+        return;
+      } catch (err: any) {
+        lastError = err;
+        if (yieldedAny) {
+          // Mid-stream: cannot switch providers (would duplicate output)
+          throw err;
+        }
+        if (i < clientsToTry.length - 1) {
+          console.warn(`[LLMHelper] Gemini client #${i + 1} cascade failed (${err?.message}), falling back to next Gemini key...`);
+        }
+      }
+    }
+
+    if (lastError) throw lastError;
   }
 
   // --- OLLAMA STREAMING (uses /api/chat with proper messages array) ---
@@ -11068,7 +11144,7 @@ let isMultimodal = !!(imagePaths?.length);
   private directProviderHasCredential(provider: DirectAssistProvider): boolean {
     switch (provider) {
       case 'natively': return this.hasNatively();
-      case 'gemini': return !!this.client;
+      case 'gemini': return !!(this.client || this.fallbackClients.length > 0);
       case 'openai': return !!this.openaiClient;
       case 'claude': return !!this.claudeClient;
       case 'groq': return !!this.groqClient;
@@ -11501,8 +11577,16 @@ let isMultimodal = !!(imagePaths?.length);
    * RETURNS A PROXY client that handles retries and fallbacks transparently
    */
   public getGeminiClient(): GoogleGenAI | null {
-    if (!this.client) return null;
-    return this.createRobustClient(this.client);
+    const active = this.client || this.fallbackClients[0] || null;
+    if (!active) return null;
+    return this.createRobustClient(active);
+  }
+
+  /**
+   * Check if Gemini is available (primary key or fallback keys)
+   */
+  public hasGemini(): boolean {
+    return this.client !== null || this.fallbackClients.length > 0;
   }
 
   /**
@@ -11669,6 +11753,25 @@ let isMultimodal = !!(imagePaths?.length);
    * 5. If that fails, throw error.
    */
   private async generateWithFallback(client: GoogleGenAI, args: any): Promise<any> {
+    const clientsToTry = [
+      client,
+      ...this.fallbackClients.filter(c => c !== client),
+    ];
+    let lastError: any = null;
+    for (let i = 0; i < clientsToTry.length; i++) {
+      try {
+        return await this._generateWithFallbackSingleClient(clientsToTry[i], args);
+      } catch (err: any) {
+        lastError = err;
+        if (i < clientsToTry.length - 1) {
+          console.warn(`[LLMHelper] Gemini generateWithFallback failed on client #${i + 1} (${err?.message}), trying next fallback key...`);
+        }
+      }
+    }
+    throw lastError;
+  }
+
+  private async _generateWithFallbackSingleClient(client: GoogleGenAI, args: any): Promise<any> {
     const originalModel = args.model;
 
     // Helper to check for valid content
