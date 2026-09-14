@@ -1,5 +1,7 @@
-const DEFAULT_SCREENSHOT_REQUEST =
-  'Analyze the attached screenshot and answer the interviewer question provided with it.';
+export const DEFAULT_SCREENSHOT_AUDIO_REQUEST =
+  'Based on the attached screen content and the spoken audio/conversation, tell me what I should say. Synthesize both what is shown on screen and what was said in the audio.';
+export const DEFAULT_SCREENSHOT_ONLY_REQUEST =
+  'Based on the attached screen content, tell me what I should say.';
 
 /**
  * Build the text/provenance portion of a Direct Assist What-to-Say request.
@@ -25,7 +27,7 @@ export function buildDirectWhatToSayPayload({
   if (hasScreenshots) {
     return {
       source: 'screenshot',
-      currentRequest: instruction || DEFAULT_SCREENSHOT_REQUEST,
+      currentRequest: instruction || (speech ? DEFAULT_SCREENSHOT_AUDIO_REQUEST : DEFAULT_SCREENSHOT_ONLY_REQUEST),
       transcript: speech || undefined,
     };
   }

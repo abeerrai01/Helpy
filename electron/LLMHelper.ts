@@ -7515,13 +7515,13 @@ let isMultimodal = !!(imagePaths?.length);
 
     // Preparation
     let isMultimodal = !!(imagePaths?.length);
-    // `context` here is the legacy transcript/context blob — state that
-    // LITERALLY, the way chatWithGemini already does, instead of leaving it to
-    // the payload heuristic. Everything else the caller declares
-    // (extraDataScopes) or the payload's own markup discloses.
+    // `context` here is either chat conversation history (User/Assistant turns)
+    // or the legacy meeting transcript/context blob. Chat conversation history must NOT
+    // be classified as meeting transcript scope, which would wipe multi-turn memory.
+    const isChatConversationHistory = Boolean(context && (context.includes('User:') || context.includes('Assistant:')));
     const contextScopes = [
       ...extraDataScopes,
-      ...(context?.trim() ? ['transcript' as ProviderDataScope] : []),
+      ...(context?.trim() && !isChatConversationHistory ? ['transcript' as ProviderDataScope] : []),
       ...this.inferContextScopes(context),
       ...this.inferEmbeddedMessageScopes(message),
     ];
@@ -7540,7 +7540,7 @@ let isMultimodal = !!(imagePaths?.length);
         yield* this.streamWithOllama(message, context, ollamaScopePrompt, imagePaths, abortSignal);
         return;
       }
-      if (deniedOutboundScopes.includes('transcript')) context = undefined;
+      if (deniedOutboundScopes.includes('transcript') && !isChatConversationHistory) context = undefined;
       if (deniedOutboundScopes.includes('reference_files')) context = undefined;
       if (deniedOutboundScopes.includes('profile_history')) context = undefined;
       if (deniedOutboundScopes.includes('post_call_summary')) context = undefined;

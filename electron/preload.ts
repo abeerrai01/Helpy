@@ -2262,7 +2262,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     message: string,
     imagePaths?: string[],
     context?: string,
-    options?: { skipSystemPrompt?: boolean; ignoreKnowledgeMode?: boolean },
+    options?: { skipSystemPrompt?: boolean; ignoreKnowledgeMode?: boolean; promptOnly?: boolean; skipAudio?: boolean },
   ) => ipcRenderer.invoke('gemini-chat-stream', message, imagePaths, context, options),
 
   onGeminiStreamToken: (callback: (token: string, meta?: { streamId?: number }) => void) => {

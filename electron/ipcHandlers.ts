@@ -1238,7 +1238,7 @@ export function initializeIpcHandlers(appState: AppState): void {
       message: string,
       imagePaths?: string[],
       context?: string,
-      options?: { skipSystemPrompt?: boolean; ignoreKnowledgeMode?: boolean },
+      options?: { skipSystemPrompt?: boolean; ignoreKnowledgeMode?: boolean; promptOnly?: boolean; skipAudio?: boolean },
     ): Promise<null> => {
       let myController: AbortController | null = null;
       let _manualFgToken: string | null = null;
@@ -1447,9 +1447,10 @@ export function initializeIpcHandlers(appState: AppState): void {
             const { resolveMeetingEvidence } = require('./context-intelligence/retrieval/meeting-evidence') as
               typeof import('./context-intelligence/retrieval/meeting-evidence');
             const v3ConversationKey = v3ConversationSessionId(appState, senderId);
+            const skipMeetingAudio = Boolean(options?.skipAudio || options?.promptOnly);
             const v3MeetingEvidence = resolveMeetingEvidence({
-              rag: appState.getRAGManager?.() ?? null,
-              segments: appState.getIntelligenceManager?.()?.getCurrentMeetingTranscript?.() ?? [],
+              rag: (skipMeetingAudio ? null : appState.getRAGManager?.()) ?? null,
+              segments: (skipMeetingAudio ? [] : appState.getIntelligenceManager?.()?.getCurrentMeetingTranscript?.()) ?? [],
               allowedSourceTypes: policy.allowedSourceTypes,
               userId: V3_USER_ID,
               sessionId: v3ConversationKey,
@@ -2167,8 +2168,10 @@ export function initializeIpcHandlers(appState: AppState): void {
         // cheap in-memory read regardless of whether `context` is set.
         let autoContextSnapshot: string | undefined;
         try {
-          const snap = intelligenceManager.getFormattedContext(100);
-          if (snap && snap.trim().length > 0) autoContextSnapshot = snap;
+          if (!options?.promptOnly && !options?.skipAudio) {
+            const snap = intelligenceManager.getFormattedContext(100);
+            if (snap && snap.trim().length > 0) autoContextSnapshot = snap;
+          }
         } catch (ctxErr) {
           console.warn('[IPC] Failed to capture pre-turn context:', ctxErr);
         }
@@ -3320,7 +3323,7 @@ export function initializeIpcHandlers(appState: AppState): void {
           console.log('[IPC] Answer-contract enforced; rolling context excluded', {
             answerType: answerPlan.answerType,
           });
-        } else if (!context && autoContextSnapshot) {
+        } else if (!context && autoContextSnapshot && !options?.promptOnly && !options?.skipAudio) {
           // Document-grounded custom mode (audit 2026-06-27, real-path fix):
           // strip prior ASSISTANT turns from the rolling snapshot before it
           // becomes the prompt context. A previously-emitted answer (e.g.
@@ -3358,7 +3361,7 @@ export function initializeIpcHandlers(appState: AppState): void {
               `[IPC] Auto-injected 100s context for gemini-chat-stream (${context.length} chars${snapshotForContext !== autoContextSnapshot ? ', prior-assistant turns stripped for document-grounded mode' : ''})`,
             );
           }
-        } else if (context && autoContextSnapshot) {
+        } else if (context && autoContextSnapshot && !options?.promptOnly && !options?.skipAudio) {
           // Issue #552 (final review pass, I4): the sibling branch above is
           // the ONLY place this rolling live-transcript snapshot reaches the
           // prompt, and it requires an ABSENT `context`. Typed chat sends its
@@ -7109,7 +7112,14 @@ export function initializeIpcHandlers(appState: AppState): void {
 
     let meetingTranscript = '';
     try {
-      meetingTranscript = appState.getIntelligenceManager()?.getFormattedContext?.(180) ?? '';
+      // Ambient meeting audio is included for audio-driven (stt) turns, explicit transcript turns,
+      // and "what to say" turns (which synthesize screen and audio).
+      // For typed turns without an explicit audio transcript (pure prompt and screenshot+prompt),
+      // do not inject ambient audio so the model answers strictly based on the prompt and/or screenshot.
+      const skipAmbientAudio = (request.source === 'typed' && !request.transcript) || Boolean((request as any).skipAudio);
+      if (!skipAmbientAudio) {
+        meetingTranscript = appState.getIntelligenceManager()?.getFormattedContext?.(180) ?? '';
+      }
     } catch (error) {
       console.warn('[direct-assist] live session transcript unavailable, proceeding without it:', (error as Error)?.message);
     }

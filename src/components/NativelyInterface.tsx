@@ -2,6 +2,7 @@ import { animate, AnimatePresence, motion, motionValue, useMotionValue, useTrans
 import {
   ArrowRight,
   ArrowDown,
+  Camera,
   ChevronDown,
   Code,
   Copy,
@@ -431,6 +432,8 @@ interface Message {
   // extension's capture meta). Renders a "Page attached · host — title" line on
   // the card, mirroring the "Screenshot attached" label — without it the pill
   // vanishes on use and nothing in the chat shows which page fed the answer.
+  // Attached screenshot file paths for multi-turn history continuity
+  imagePaths?: string[];
   pageContext?: { title?: string; url?: string };
   // Field names Direct Assist dropped to fit the model's context window (e.g.
   // "referenceContext", "meetingTranscript") — never user content, just the
@@ -543,13 +546,34 @@ interface NativelyInterfaceProps {
 
 const buildConversationContextFromMessages = (items: Message[]): string =>
   items
-    .filter((m) => !(m.role === 'user' && (m.hasScreenshot || m.isQuickActionLabel)))
-    .map(
-      (m) =>
-        `${m.role === 'interviewer' ? 'Interviewer' : m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}`,
-    )
-    .slice(-20)
+    .filter((m) => !m.isStreaming && typeof m.text === 'string' && m.text.trim().length > 0)
+    .map((m) => {
+      const roleLabel = m.role === 'interviewer' ? 'Interviewer' : m.role === 'user' ? 'User' : 'Assistant';
+      const screenshotNote = m.hasScreenshot ? ' [Attached Screenshot]' : '';
+      return `${roleLabel}${screenshotNote}: ${m.text.trim()}`;
+    })
+    .slice(-24)
     .join('\n');
+
+const buildDirectAssistHistoryFromMessages = (items: Message[]): DirectAssistHistoryTurn[] => {
+  const turns: DirectAssistHistoryTurn[] = [];
+  const completed = items.filter((m) => !m.isStreaming && typeof m.text === 'string' && m.text.trim().length > 0);
+  for (const m of completed) {
+    if (m.role === 'user') {
+      turns.push({
+        role: 'user',
+        content: m.text.trim(),
+        ...(m.imagePaths && m.imagePaths.length > 0 ? { imagePaths: m.imagePaths } : {}),
+      });
+    } else if (m.role === 'system') {
+      turns.push({
+        role: 'assistant',
+        content: m.text.trim(),
+      });
+    }
+  }
+  return turns.slice(-24);
+};
 
 // PERF: HighlightedCode renders a single fenced code block. Hoisted to module
 // scope and wrapped in React.memo so a parent re-render does not re-tokenize
@@ -5872,7 +5896,9 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         // prompt rewriting or instruction injection.
         currentRequest,
         skillId: directAssistSkillId(currentRequest),
-        history: directAssistHistoryRef.current.slice(-24),
+        history: directAssistHistoryRef.current.length > 0
+          ? directAssistHistoryRef.current.slice(-24)
+          : buildDirectAssistHistoryFromMessages(messages),
         ...(directPageContext ? { pageContext: directPageContext } : {}),
         ...(imagePaths && imagePaths.length > 0 ? { imagePaths } : {}),
         ...(transcript ? { transcript } : {}),
@@ -6617,6 +6643,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
   // 3 screenshot-branch strings below are not run through useT()).
   const QUICK_ACTION_LABELS: Record<string, string> = {
     what_to_say: 'What should I say?',
+    screenshot_and_prompt: 'Screenshot & Prompt',
     recap: 'Recap',
     follow_up_questions: 'Follow-up questions',
     clarify: 'Clarify',
@@ -6653,15 +6680,41 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
       currentAttachments = [...currentAttachments, pending].slice(-5);
     }
 
+    // "What to Say" automatically captures current screen content if none attached
+    if (currentAttachments.length === 0) {
+      try {
+        const shot = await window.electronAPI?.takeScreenshot?.();
+        if (shot && shot.path) {
+          currentAttachments = [{ path: shot.path, preview: shot.preview || '' }];
+        }
+      } catch (err) {
+        console.warn('[WhatToSay] Auto-screenshot capture failed:', err);
+      }
+    }
+
+    // Audio context: capture from recent conversation / rolling audio
+    const initialAudioSnapshot = pendingRollingPartialRef.current
+      ? mergeRollingTranscriptPartial(rollingTranscript, pendingRollingPartialRef.current)
+      : rollingTranscript;
+    const initialInterviewerSpeech = initialAudioSnapshot
+      .split('  ·  ')
+      .slice(-4)
+      .join('  ·  ')
+      .trim()
+      .slice(-8192);
+
     if (currentAttachments.length > 0) {
       setAttachedContext([]);
-      // Show the attached image in chat FIRST — question card must appear before AI response
+      // Show the attached image and audio in chat FIRST — question card must appear before AI response
+      const questionText = initialInterviewerSpeech
+        ? `What should I say?\n\n🎙️ Audio: "${initialInterviewerSpeech}"`
+        : 'What should I say about this screen?';
       setMessages((prev) => [
         ...prev,
         {
           id: questionCardId,
           role: 'user',
-          text: 'What should I say about this?',
+          text: questionText,
           hasScreenshot: true,
           screenshotPreview: currentAttachments[0].preview,
           screenshotPreviews: currentAttachments.map((a) => a.preview).filter(Boolean),
@@ -6674,9 +6727,12 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     } else {
       // No screenshot attached — still show a question card so the answer
       // never appears with no preceding "question" bubble.
+      const questionText = initialInterviewerSpeech
+        ? `What should I say?\n\n🎙️ Audio: "${initialInterviewerSpeech}"`
+        : QUICK_ACTION_LABELS.what_to_say;
       setMessages((prev) => [
         ...prev,
-        { id: questionCardId, role: 'user', text: QUICK_ACTION_LABELS.what_to_say, isQuickActionLabel: true },
+        { id: questionCardId, role: 'user', text: questionText, isQuickActionLabel: true },
       ]);
     }
 
@@ -6834,9 +6890,9 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
             }
           : undefined;
 
-      // Pass imagePath if attached
+      // Pass imagePath if attached, and pass initialInterviewerSpeech as question
       const result = await window.electronAPI.generateWhatToSay(
-        undefined,
+        initialInterviewerSpeech || undefined,
         currentAttachments.length > 0 ? currentAttachments.map((s) => s.path) : undefined,
         options,
       );
@@ -6895,6 +6951,24 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
       // A Direct stream outlives the start IPC acknowledgement; its correlated
       // terminal event owns the processing state. Legacy WTA is request/response.
       if (!directAssistEnabled) setIsProcessing(false);
+    }
+  };
+
+  const handleScreenshotAndPrompt = async () => {
+    setIsProcessing(true);
+    try {
+      const shot = await window.electronAPI?.takeScreenshot?.();
+      if (shot && shot.path) {
+        setAttachedContext((prev) => [...prev, { path: shot.path, preview: shot.preview || '' }].slice(-5));
+        setIsExpanded(true);
+        setTimeout(() => {
+          textInputRef.current?.focus();
+        }, 100);
+      }
+    } catch (err) {
+      console.warn('[ScreenshotAndPrompt] Capture failed:', err);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -7870,22 +7944,7 @@ Provide only the answer, nothing else.`;
       return;
     }
     manualSubmitInFlightRef.current = true;
-    lastManualSubmitRef.current = { text: userText, atMs: nowMs };
-
-    let currentAttachments = attachedContext;
-    if (
-      currentAttachments.length === 0 &&
-      /\b(screen|screenshot|code|question|problem|solve|this|look|error|console|window)\b/i.test(userText)
-    ) {
-      try {
-        const shot = await window.electronAPI?.takeScreenshot?.();
-        if (shot && shot.path) {
-          currentAttachments = [{ path: shot.path, preview: shot.preview || '' }];
-        }
-      } catch (err) {
-        console.warn('Auto-screenshot on typed submit failed:', err);
-      }
-    }
+    const currentAttachments = attachedContext;
 
     // Clear inputs immediately
     setInputValue('');
@@ -7921,6 +7980,7 @@ Provide only the answer, nothing else.`;
         hasScreenshot: currentAttachments.length > 0,
         screenshotPreview: currentAttachments[0]?.preview,
         screenshotPreviews: currentAttachments.map((a) => a.preview).filter(Boolean),
+        imagePaths: currentAttachments.map((a) => a.path),
       },
     ]);
 
@@ -8018,6 +8078,10 @@ Provide only the answer, nothing else.`;
         userText || 'Analyze this screenshot',
         currentAttachments.length > 0 ? currentAttachments.map((s) => s.path) : undefined,
         conversationContextForSubmit, // Pass freshly-derived context so "answer this" works
+        {
+          promptOnly: currentAttachments.length === 0,
+          skipAudio: true,
+        },
       );
     } catch (err) {
       // R-17: release the claim taken above — see the note at the other call site.
@@ -8583,6 +8647,7 @@ Provide only the answer, nothing else.`;
   // We use a ref to hold the latest handlers to avoid re-binding the event listener on every render
   const handlersRef = useRef({
     handleWhatToSay,
+    handleScreenshotAndPrompt,
     handleFollowUp,
     handleFollowUpQuestions,
     handleRecap,
@@ -8595,6 +8660,7 @@ Provide only the answer, nothing else.`;
   // Update ref on every render so the event listener always access latest state/props
   handlersRef.current = {
     handleWhatToSay,
+    handleScreenshotAndPrompt,
     handleFollowUp,
     handleFollowUpQuestions,
     handleRecap,
@@ -8812,16 +8878,7 @@ Provide only the answer, nothing else.`;
       setIsMousePassthrough(newState);
       window.electronAPI?.setOverlayMousePassthrough?.(newState);
     },
-    takeScreenshot: async () => {
-      try {
-        const data = await window.electronAPI.takeScreenshot();
-        if (data && data.path) {
-          handleScreenshotAttach(data as { path: string; preview: string });
-        }
-      } catch (err) {
-        console.error('Error triggering screenshot:', err);
-      }
-    },
+    takeScreenshot: handleScreenshotAndPrompt,
     selectiveScreenshot: async () => {
       try {
         const data = await window.electronAPI.takeSelectiveScreenshot();
@@ -8853,16 +8910,7 @@ Provide only the answer, nothing else.`;
       setIsMousePassthrough(newState);
       window.electronAPI?.setOverlayMousePassthrough?.(newState);
     },
-    takeScreenshot: async () => {
-      try {
-        const data = await window.electronAPI.takeScreenshot();
-        if (data && data.path) {
-          handleScreenshotAttach(data as { path: string; preview: string });
-        }
-      } catch (err) {
-        console.error('Error triggering screenshot:', err);
-      }
-    },
+    takeScreenshot: handleScreenshotAndPrompt,
     selectiveScreenshot: async () => {
       try {
         const data = await window.electronAPI.takeSelectiveScreenshot();
@@ -10366,8 +10414,17 @@ Provide only the answer, nothing else.`;
                   onClick={handleWhatToSay}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border transition-all active:scale-95 duration-200 interaction-base interaction-press whitespace-nowrap shrink-0 ${quickActionClass}`}
                   style={appearance.chipStyle}
+                  title={t('Answer based on screen content and audio')}
                 >
-                  <Pencil className="w-3 h-3 opacity-70" /> {t('What to answer?')}
+                  <Pencil className="w-3 h-3 opacity-70" /> {t('What to say')}
+                </button>
+                <button
+                  onClick={handleScreenshotAndPrompt}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border transition-all active:scale-95 duration-200 interaction-base interaction-press whitespace-nowrap shrink-0 ${quickActionClass}`}
+                  style={appearance.chipStyle}
+                  title={t('Capture screenshot and ask a question about it')}
+                >
+                  <Camera className="w-3 h-3 opacity-70" /> {t('Screenshot & Prompt')}
                 </button>
                 <button
                   onClick={handleClarify}
@@ -10646,26 +10703,37 @@ Provide only the answer, nothing else.`;
                   {/* Custom Rich Placeholder */}
                   {!inputValue && (
                     <div className="absolute inset-x-3 top-1/2 -translate-y-1/2 min-w-0 overflow-hidden whitespace-nowrap pointer-events-none text-[13px] overlay-text-muted">
-                      <span className="overlay-input-placeholder-full inline-flex items-center gap-1.5">
-                        <span>{t('Ask anything on screen or conversation, or')}</span>
-                      <span className="flex items-center gap-1 opacity-80">
-                        {(
-                          shortcuts.selectiveScreenshot || [getModifierSymbol('cmd'), 'Shift', 'H']
-                        ).map((key, i) => (
-                          <React.Fragment key={i}>
-                            {i > 0 && <span className="text-[10px]">+</span>}
-                            <kbd
-                              className="px-1.5 py-0.5 rounded border text-[10px] font-sans min-w-[20px] text-center overlay-control-surface overlay-text-secondary"
-                              style={appearance.controlStyle}
-                            >
-                              {key}
-                            </kbd>
-                          </React.Fragment>
-                        ))}
-                      </span>
-                      <span>{t('for selective screenshot')}</span>
-                      </span>
-                      <span className="overlay-input-placeholder-compact">{t('Ask anything…')}</span>
+                      {attachedContext.length > 0 ? (
+                        <>
+                          <span className="overlay-input-placeholder-full inline-flex items-center gap-1.5">
+                            <span>{t('What should I do with this screenshot? Type your prompt…')}</span>
+                          </span>
+                          <span className="overlay-input-placeholder-compact">{t('Ask about screenshot…')}</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="overlay-input-placeholder-full inline-flex items-center gap-1.5">
+                            <span>{t('Ask anything (prompt only, no screen & audio), or')}</span>
+                            <span className="flex items-center gap-1 opacity-80">
+                              {(
+                                shortcuts.selectiveScreenshot || [getModifierSymbol('cmd'), 'Shift', 'H']
+                              ).map((key, i) => (
+                                <React.Fragment key={i}>
+                                  {i > 0 && <span className="text-[10px]">+</span>}
+                                  <kbd
+                                    className="px-1.5 py-0.5 rounded border text-[10px] font-sans min-w-[20px] text-center overlay-control-surface overlay-text-secondary"
+                                    style={appearance.controlStyle}
+                                  >
+                                    {key}
+                                  </kbd>
+                                </React.Fragment>
+                              ))}
+                            </span>
+                            <span>{t('for selective screenshot')}</span>
+                          </span>
+                          <span className="overlay-input-placeholder-compact">{t('Ask anything…')}</span>
+                        </>
+                      )}
                     </div>
                   )}
 
@@ -10818,6 +10886,18 @@ Provide only the answer, nothing else.`;
                         style={appearance.iconStyle}
                       >
                         <PointerOff className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Screenshot & Ask Button */}
+                    <div className="relative">
+                      <button
+                        onClick={handleScreenshotAndPrompt}
+                        title={t('Take screenshot and ask')}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg interaction-base interaction-press overlay-icon-surface overlay-icon-surface-hover overlay-text-interactive"
+                        style={appearance.iconStyle}
+                      >
+                        <Camera className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>
