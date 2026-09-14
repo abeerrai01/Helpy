@@ -139,11 +139,9 @@ export interface ScreenUnderstandingResult {
  * for why a best-effort enrichment step on the critical path needs a total
  * bound rather than a per-provider one.
  *
- * 6000, below the chain's 12s per-provider default: the per-attempt timeout is
- * clamped to whatever is left of this, so this is the number that decides how
- * long a user waits before their answer starts.
+ * 2500ms, clamped to prevent user-facing stalls on the critical path.
  */
-export const SCREEN_UNDERSTANDING_TOTAL_BUDGET_MS = 6000;
+export const SCREEN_UNDERSTANDING_TOTAL_BUDGET_MS = 2500;
 
 export class ScreenUnderstandingService {
   private imageHashService: ImageHashService;

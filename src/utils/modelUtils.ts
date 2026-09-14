@@ -3,7 +3,7 @@ export const STANDARD_CLOUD_MODELS: Record<string, {
     ids: string[];
     names: string[];
     descs: string[];
-    pmKey: 'geminiPreferredModel' | 'openaiPreferredModel' | 'claudePreferredModel' | 'groqPreferredModel' | 'deepseekPreferredModel' | 'nvidia_nimPreferredModel';
+    pmKey: 'geminiPreferredModel' | 'openaiPreferredModel' | 'claudePreferredModel' | 'groqPreferredModel' | 'deepseekPreferredModel' | 'nvidia_nimPreferredModel' | 'openrouterPreferredModel';
 }> = {
     gemini: {
         hasKeyCheck: (creds) => !!creds?.hasGeminiKey,
@@ -20,6 +20,33 @@ export const STANDARD_CLOUD_MODELS: Record<string, {
         names: ['GPT 5.4'],
         descs: ['OpenAI'],
         pmKey: 'openaiPreferredModel'
+    },
+    openrouter: {
+        hasKeyCheck: (creds) => !!creds?.hasOpenRouterKey,
+        // Free-tier & cheap OpenRouter models — users can always type a custom id
+        // in Settings → AI Providers → OpenAI/OpenRouter preferred model.
+        ids: [
+            'openai/gpt-4o-mini',
+            'meta-llama/llama-3.3-70b-instruct:free',
+            'google/gemini-2.0-flash-exp:free',
+            'deepseek/deepseek-chat-v3-0324:free',
+            'mistralai/mistral-7b-instruct:free',
+        ],
+        names: [
+            'GPT-4o Mini (OpenRouter)',
+            'Llama 3.3 70B Free (OpenRouter)',
+            'Gemini 2.0 Flash Free (OpenRouter)',
+            'DeepSeek V3 Free (OpenRouter)',
+            'Mistral 7B Free (OpenRouter)',
+        ],
+        descs: [
+            'Fast • Affordable',
+            'Free • High Quality',
+            'Free • Multimodal',
+            'Free • Reasoning',
+            'Free • Lightweight',
+        ],
+        pmKey: 'openrouterPreferredModel'
     },
     claude: {
         hasKeyCheck: (creds) => !!creds?.hasClaudeKey,

@@ -425,10 +425,11 @@ export class SettingsManager {
         return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
     }
 
-    /** Effective Direct Assist state. Persisted default is false. */
+    /** Effective Direct Assist state. Defaults to true for instant responses. */
     public getDirectAssistEnabled(): boolean {
         if (this.isDirectAssistKilledByOperator()) return false;
-        return this.settings.directAssistEnabled === true;
+        if (this.settings.directAssistEnabled === false) return false;
+        return this.settings.directAssistEnabled === true || this.settings.directAssistEnabled === undefined;
     }
 
     /** Effective Direct Assist fallback state. Persisted default is TRUE. */

@@ -349,6 +349,10 @@ export function initializeIpcHandlers(appState: AppState): void {
         if (modelId.startsWith('ollama-')) return 'ollama';
         if (modelId.startsWith('gemini-') || modelId.startsWith('models/')) return 'gemini';
         if (isKnownGroqModel(modelId)) return 'groq';
+        const rawOpenaiKey = cm.getOpenaiApiKey?.() || '';
+        const isOpenRouter = rawOpenaiKey.startsWith('sk-or-') || rawOpenaiKey.toLowerCase().includes('openrouter');
+        if (isOpenRouter && (modelId.startsWith('openrouter/') || (modelId.includes('/') && !modelId.startsWith('litellm/') && !modelId.startsWith('nvidia_nim/')))) return 'openrouter';
+        if (modelId.startsWith('openrouter/')) return 'openrouter';
         // o4- included deliberately: modelFetcher.ts admits /^o[134]/, so o4-* ids reach
         // here. Omitting it made providerFamily return 'unknown', so the disabled-provider
         // check below never matched and switching OpenAI off did NOT hide o4 models from
@@ -406,6 +410,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         // Check Groq before the broad OpenAI catch-all so Groq-hosted ids such as
         // openai/gpt-oss-120b are gated by the Groq key, not the OpenAI key.
         if (isKnownGroqModel(modelId)) return has(cm.getGroqApiKey());
+        if (family === 'openrouter' || modelId.startsWith('openrouter/')) return has(cm.getOpenaiApiKey());
         if (modelId.startsWith('gpt-') || modelId.startsWith('o1-') || modelId.startsWith('o3-') || modelId.startsWith('o4-') || modelId.includes('openai')) return has(cm.getOpenaiApiKey());
         if (modelId.startsWith('claude-')) return has(cm.getClaudeApiKey());
         if (/^deepseek-v/i.test(modelId)) return has(cm.getDeepseekApiKey());
@@ -10615,10 +10620,13 @@ export function initializeIpcHandlers(appState: AppState): void {
       // Return masked versions for security (just indicate if set)
       const hasKey = (key?: string) => !!(key && key.trim().length > 0);
 
+      const openaiKey = creds.openaiApiKey || cm.getOpenaiApiKey() || '';
+      const isOpenRouterKey = !!(openaiKey && (openaiKey.startsWith('sk-or-') || openaiKey.toLowerCase().includes('openrouter')));
       return {
         hasGeminiKey: hasKey(creds.geminiApiKey || cm.getGeminiApiKey()),
         hasGroqKey: hasKey(creds.groqApiKey || cm.getGroqApiKey()),
-        hasOpenaiKey: hasKey(creds.openaiApiKey || cm.getOpenaiApiKey()),
+        hasOpenaiKey: hasKey(openaiKey) && !isOpenRouterKey,
+        hasOpenRouterKey: hasKey(openaiKey) && isOpenRouterKey,
         hasClaudeKey: hasKey(creds.claudeApiKey || cm.getClaudeApiKey()),
         hasDeepseekKey: hasKey(creds.deepseekApiKey || cm.getDeepseekApiKey()),
         hasNvidiaNimKey: hasKey(creds.nvidiaNimApiKey || cm.getNvidiaNimApiKey()),
@@ -10674,6 +10682,7 @@ export function initializeIpcHandlers(appState: AppState): void {
             : creds.nvidia_nimPreferredModel || undefined,
         // Stored prefixed (`litellm/<model>`) — see StoredCredentials.litellmPreferredModel.
         litellmPreferredModel: creds.litellmPreferredModel || undefined,
+        openrouterPreferredModel: creds.openrouterPreferredModel || undefined,
         disabledProviders: creds.disabledProviders || [],
         cloudEnabledModels: creds.cloudEnabledModels || {},
       };
@@ -10683,6 +10692,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         hasGeminiKey: false,
         hasGroqKey: false,
         hasOpenaiKey: false,
+        hasOpenRouterKey: false,
         hasClaudeKey: false,
         hasDeepseekKey: false,
         hasNvidiaNimKey: false,
@@ -10770,7 +10780,7 @@ export function initializeIpcHandlers(appState: AppState): void {
 
   safeHandle(
     'set-provider-preferred-model',
-    async (_, provider: 'gemini' | 'groq' | 'openai' | 'claude' | 'deepseek' | 'nvidia_nim' | 'litellm', modelId: string) => {
+    async (_, provider: 'gemini' | 'groq' | 'openai' | 'claude' | 'deepseek' | 'nvidia_nim' | 'litellm' | 'openrouter', modelId: string) => {
       try {
         const { CredentialsManager } = require('./services/CredentialsManager');
         CredentialsManager.getInstance().setPreferredModel(provider, modelId);
@@ -11705,17 +11715,28 @@ export function initializeIpcHandlers(appState: AppState): void {
           }
           if (lastGroqError) throw lastGroqError;
         } else if (provider === 'openai') {
-          response = await axios.post(
-            'https://api.openai.com/v1/chat/completions',
-            {
-              model: 'gpt-4o-mini',
-              messages: [{ role: 'user', content: 'Hello' }],
-            },
-            {
-              headers: { Authorization: `Bearer ${apiKey}` },
-              timeout: 15000,
-            },
-          );
+          const isOpenRouter = apiKey.startsWith('sk-or-') || apiKey.toLowerCase().includes('openrouter');
+          if (isOpenRouter) {
+            response = await axios.get(
+              'https://openrouter.ai/api/v1/auth/key',
+              {
+                headers: { Authorization: `Bearer ${apiKey}` },
+                timeout: 15000,
+              },
+            );
+          } else {
+            response = await axios.post(
+              'https://api.openai.com/v1/chat/completions',
+              {
+                model: 'gpt-4o-mini',
+                messages: [{ role: 'user', content: 'Hello' }],
+              },
+              {
+                headers: { Authorization: `Bearer ${apiKey}` },
+                timeout: 15000,
+              },
+            );
+          }
         } else if (provider === 'claude') {
           response = await axios.post(
             'https://api.anthropic.com/v1/messages',

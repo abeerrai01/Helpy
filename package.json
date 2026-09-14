@@ -9,7 +9,7 @@
   "scripts": {
     "clean": "rimraf dist dist-electron",
     "dev": "vite",
-    "build": "npm run clean && node node_modules/typescript7/lib/tsc.js -p tsconfig.json && vite build",
+    "build": "rimraf dist && node node_modules/typescript7/lib/tsc.js -p tsconfig.json && vite build",
     "build:electron": "node scripts/build-electron.js",
     "build:electron:core-smoke": "cross-env NATIVELY_CORE_SMOKE=1 node scripts/build-electron.js",
     "typecheck:electron": "node node_modules/typescript7/lib/tsc.js -p electron/tsconfig.json --noEmit",

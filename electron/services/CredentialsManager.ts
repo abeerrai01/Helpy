@@ -95,7 +95,7 @@ export interface CurlProvider {
  * and setter build the key by concatenation, so adding a name here without the
  * field would silently read and write `undefined`.
  */
-export type PreferredModelProvider = 'gemini' | 'groq' | 'openai' | 'claude' | 'deepseek' | 'nvidia_nim' | 'litellm';
+export type PreferredModelProvider = 'gemini' | 'groq' | 'openai' | 'claude' | 'deepseek' | 'nvidia_nim' | 'litellm' | 'openrouter';
 
 export interface StoredCredentials {
     geminiApiKey?: string;
@@ -168,6 +168,8 @@ export interface StoredCredentials {
      * to something that no longer exists.
      */
     litellmPreferredModel?: string;
+    /** The OpenRouter model the user selected as their preferred (e.g. `openai/gpt-4o-mini`). */
+    openrouterPreferredModel?: string;
     /**
      * Provider ids the user switched off in Settings → AI Providers. A disabled
      * provider keeps its stored credential but contributes no models to the
