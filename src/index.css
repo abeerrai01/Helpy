@@ -2863,6 +2863,26 @@ a {
   cursor: default !important;
 }
 
+/* Ensure AI response cards, markdown content, code blocks, and chat text are selectable and never window-drag regions */
+.ai-response-card,
+.markdown-content,
+.selectable-text,
+.message-content,
+.code-card-mount-in,
+.overlay-response-body,
+pre,
+code {
+  -webkit-app-region: no-drag;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.ai-response-card *,
+.markdown-content *,
+.selectable-text * {
+  -webkit-app-region: no-drag;
+}
+
 /* ─── Global cursor lock ─────────────────────────────────────────────────
    This is a desktop Electron app — the only cursor we ever show is the
    default arrow. No I-beam on inputs, no pointer on buttons, no text-select
@@ -2923,6 +2943,18 @@ a,
 :root:not([data-undetectable="true"]) .resize-handle.resize-handle-e { cursor: ew-resize !important; }
 :root:not([data-undetectable="true"]) .resize-handle.resize-handle-s { cursor: ns-resize !important; }
 :root:not([data-undetectable="true"]) .resize-handle.resize-handle-se { cursor: nwse-resize !important; }
+:root:not([data-undetectable="true"]) .ai-response-card p,
+:root:not([data-undetectable="true"]) .ai-response-card span:not(button span):not([role="button"] span),
+:root:not([data-undetectable="true"]) .ai-response-card li,
+:root:not([data-undetectable="true"]) .markdown-content p,
+:root:not([data-undetectable="true"]) .markdown-content span:not(button span):not([role="button"] span),
+:root:not([data-undetectable="true"]) .markdown-content li,
+:root:not([data-undetectable="true"]) .markdown-content pre,
+:root:not([data-undetectable="true"]) .markdown-content code,
+:root:not([data-undetectable="true"]) .selectable-text,
+:root:not([data-undetectable="true"]) .selectable-text * {
+  cursor: text !important;
+}
 /* @cursor-lock-exception:end */
 
 /* Restore keyboard focus rings that Tailwind preflight removes */

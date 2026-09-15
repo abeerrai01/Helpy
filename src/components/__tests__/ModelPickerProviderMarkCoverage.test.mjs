@@ -84,7 +84,7 @@ test('the registry is non-empty — otherwise every assertion below is vacuous',
 
 test('every cloud provider the picker can list resolves to a real brand mark', () => {
     const providers = registryKeys(modelUtilsSrc, 'STANDARD_CLOUD_MODELS');
-    assert.ok(providers.length >= 5, `expected the provider table, got ${providers.length}`);
+    assert.ok(providers.length >= 3, `expected the provider table, got ${providers.length}`);
 
     const missing = providers.filter(p => !markKeys.has(p));
     assert.deepEqual(

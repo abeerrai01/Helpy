@@ -25,7 +25,7 @@
 import { classifyVisionError } from './visionStreamFallback';
 
 /** Preview tier, multimodal. What routing uses by default. */
-export const GROQ_PRIMARY_MODEL = 'qwen/qwen3.6-27b';
+export const GROQ_PRIMARY_MODEL = 'qwen/qwen3.8-27b';
 
 /**
  * Production tier, text-only. Survives the primary's retirement.
@@ -90,7 +90,7 @@ export function isGroqModelId(modelId: string | null | undefined): boolean {
  */
 export const GROQ_VISION_MODEL = GROQ_PRIMARY_MODEL;
 export function groqSupportsImages(modelId: string | null | undefined): boolean {
-  return /qwen3\.6/i.test(modelId || '');
+  return /qwen3\.(?:[6-9]|\d{2,})|qwen2(?:\.5)?-vl/i.test(modelId || '');
 }
 
 /**

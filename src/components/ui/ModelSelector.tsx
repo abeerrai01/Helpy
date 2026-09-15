@@ -98,11 +98,15 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({ currentModel, onSe
         if (model === 'gemini-3.6-flash') return 'Gemini 3.6 Flash';
         if (model === 'gemini-3.1-flash-lite') return 'Gemini 3.1 Flash Lite';
         if (model === 'gemini-3.1-pro-preview') return 'Gemini 3.1 Pro';
+        if (model === 'qwen/qwen3.8-27b') return 'Groq Qwen 3.8';
+        if (model === 'qwen/qwen3.8-8b') return 'Groq Qwen 3.8 (8B)';
         if (model === 'qwen/qwen3.6-27b') return 'Groq Qwen 3.6';
         if (model === 'openai/gpt-oss-120b') return 'Groq GPT-OSS 120B';
         if (model === 'openai/gpt-oss-20b') return 'Groq GPT-OSS 20B';
-        if (model === 'gpt-5.4') return 'GPT 5.4';
-        if (model === 'claude-sonnet-4-6') return 'Sonnet 4.6';
+        if (model === 'openrouter/free') return 'Auto Free (OpenRouter)';
+        if (model === 'google/gemma-4-31b-it:free') return 'Gemma 4 31B (OpenRouter)';
+        if (model === 'nvidia/nemotron-3.5-lightning:free') return 'Nemotron 3.5 (OpenRouter)';
+        if (model === 'inclusionai/ling-3.0-flash-vl:free') return 'Ling 3.0 Flash VL (OpenRouter)';
 
         // Check dynamic cloud models
         const cloud = cloudModels.find(m => m.id === model);

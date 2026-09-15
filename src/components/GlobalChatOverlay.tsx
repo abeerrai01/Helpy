@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { genMessageId } from '../utils/messageId';
 import nativelyIcon from './icon.png';
 import { useResolvedTheme } from '../hooks/useResolvedTheme';
+import { copyTextToClipboard } from '../utils/clipboard';
 
 // ============================================
 // Types
@@ -68,12 +69,10 @@ const AssistantMessage: React.FC<{ content: string; isStreaming?: boolean }> = (
     const [copied, setCopied] = useState(false);
 
     const handleCopy = async () => {
-        try {
-            await navigator.clipboard.writeText(content);
+        const ok = await copyTextToClipboard(content);
+        if (ok) {
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
-        } catch (err) {
-            console.error('Failed to copy:', err);
         }
     };
 

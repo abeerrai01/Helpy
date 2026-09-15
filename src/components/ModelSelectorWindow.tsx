@@ -164,15 +164,13 @@ const ModelSelectorWindow = () => {
                     // Ignore ollama errors here
                 }
 
-                // Build the list
+                // Build the list - restricted to gemini, openrouter, groq only
                 const models: ModelOption[] = [];
-
-                if (creds?.hasNativelyKey) {
-                    models.push({ id: 'natively', name: 'Natively API', type: 'cloud', provider: 'natively' });
-                }
+                const ALLOWED_LIVE_PROVIDERS = new Set(['gemini', 'openrouter', 'groq']);
 
                 // Cloud Models — standard models + unique preferred models
                 for (const [prov, cfg] of Object.entries(STANDARD_CLOUD_MODELS)) {
+                    if (!ALLOWED_LIVE_PROVIDERS.has(prov)) continue;
                     if (!cfg.hasKeyCheck(creds)) continue;
                     cfg.ids.forEach((id, i) => {
                         models.push({ id, name: cfg.names[i], type: 'cloud', provider: prov });
@@ -183,63 +181,13 @@ const ModelSelectorWindow = () => {
                     }
                 }
 
-                try {
-                    const result = await window.electronAPI.antigravityModels();
-                    for (const model of result.models) {
-                        models.push({ id: `antigravity:${model.id}`, name: `${model.label} (Antigravity)`, type: 'cloud', provider: 'antigravity' });
-                    }
-                } catch { /* Offline or signed out; other providers remain available. */ }
-
-                // Custom Providers
-                customProviders.forEach((p: any) => {
-                    models.push({ id: p.id, name: p.name, type: 'custom' });
-                });
-
-                // Codex CLI
-                if (codexCliConfig?.enabled && codexSignedIn) {
-                    const configuredName = codexModels.find(model => model.id === codexCliConfig.model)?.name || prettifyModelId(codexCliConfig.model);
-                    models.push({ id: CODEX_CLI_MODEL.id, name: `${CODEX_CLI_MODEL.name} (${configuredName})`, type: 'codex-cli', provider: 'codex-cli' });
-                    codexModels.forEach(model => {
-                        models.push({ id: codexCliSelectorId(model.id), name: model.name, type: 'codex-cli', provider: 'codex-cli' });
-                    });
-                }
-
-                // Ollama
-                ollamaModels.forEach((m: string) => {
-                    models.push({ id: `ollama-${m}`, name: `${m} (Local)`, type: 'ollama' });
-                });
-
-                // LiteLLM proxy — auto-discovered from the configured proxy's /v1/models.
-                // Wrapped in try/catch so a missing/offline proxy never blocks the list.
-                try {
-                    const litellmModels = await window.electronAPI?.getAvailableLiteLLMModels?.() || [];
-                    litellmModels.forEach((m: string) => {
-                        // Label is the bare model name — `m` still carries the proxy's
-                        // own `<upstream>/` prefix (see litellmModelLabel).
-                        models.push({ id: `litellm/${m}`, name: `${litellmModelLabel(m)} (LiteLLM)`, type: 'cloud', provider: 'litellm' });
-                    });
-                } catch {
-                    // LiteLLM proxy may not be running — ignore.
-                }
-
                 if (cancelled || myToken !== runToken) return;
 
-                // Settings → AI Providers is where the user curates this list, and
-                // until now NOTHING here honoured it: a provider switched off and a
-                // model un-ticked both still showed up in the meeting overlay. That
-                // is load-bearing for a gateway like LiteLLM, whose catalogue can run
-                // to 300+ models — its allow-list is opt-in (empty = none), so
-                // without this gate the picker would list every model on the proxy.
-                //
-                // `family` mirrors providerFamily() in ipcHandlers.ts. Codex presets
-                // and custom providers have no allow-list UI, so their empty list
-                // means "no filter" and isModelAllowed lets them through unchanged.
                 const disabled = new Set(creds?.disabledProviders || []);
                 const allowLists: Record<string, string[]> = creds?.cloudEnabledModels || {};
                 const visibleModels = models.filter(m => {
-                    const family = m.provider
-                        ?? (m.type === 'ollama' ? 'ollama' : m.type === 'custom' ? 'custom' : null);
-                    if (!family) return true;
+                    const family = m.provider;
+                    if (!family || !ALLOWED_LIVE_PROVIDERS.has(family)) return false;
                     if (disabled.has(family)) return false;
                     return isModelAllowed(family, m.id, allowLists[family] || []);
                 });

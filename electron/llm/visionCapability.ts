@@ -19,7 +19,7 @@
 // authoritative source; this regex is used when capabilities are absent (older
 // Ollama servers) or the probe failed.
 const OLLAMA_VISION_NAME_RE =
-  /(llava|bakllava|moondream|llama-?3\.2-vision|llama3\.2-vision|gemma3|minicpm-v|qwen2\.5-vl|qwen2-vl|pixtral|llama-?4|granite3\.2-vision|mistral-small3\.1|llama-?guard3-vision)/i;
+  /(llava|bakllava|moondream|llama-?3\.2-vision|llama3\.2-vision|gemma3|minicpm-v|qwen2\.5-vl|qwen2-vl|qwen3\.(?:[6-9]|\d{2,})|pixtral|llama-?4|granite3\.2-vision|mistral-small3\.1|llama-?guard3-vision)/i;
 
 export function isOllamaVisionModelByName(modelId: string): boolean {
   return !!modelId && OLLAMA_VISION_NAME_RE.test(modelId.toLowerCase());

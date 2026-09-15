@@ -545,7 +545,7 @@ export class ProviderRouter {
         // Default: Groq for speed (most bang for buck on free tier)
         return {
             provider: 'groq',
-            model: 'qwen/qwen3.6-27b',
+            model: 'qwen/qwen3.8-27b',
             reason: 'default routing: Groq (fastest free tier)'
         };
     }
@@ -583,12 +583,12 @@ export class ProviderRouter {
         available: string[],
         health: Record<string, ProviderHealthStatus>
     ): ProviderChoice | null {
-        // Mode-specific routing (simplified)
+        // Mode-specific routing (simplified) - restricted to groq, gemini, openrouter
         const modePreferences: Record<ModeTemplateType, string[]> = {
-            'sales': ['groq', 'gemini', 'openai'],
-            'recruiting': ['claude', 'groq', 'gemini'],
-            'interview': ['gemini', 'groq', 'openai'],
-            'default': ['groq', 'gemini', 'openai']
+            'sales': ['groq', 'gemini', 'openrouter'],
+            'recruiting': ['gemini', 'groq', 'openrouter'],
+            'interview': ['gemini', 'groq', 'openrouter'],
+            'default': ['groq', 'gemini', 'openrouter']
         };
 
         const preferences = modePreferences[mode] || modePreferences['default'];
@@ -598,12 +598,9 @@ export class ProviderRouter {
     private getDefaultModel(provider: string): string {
         const models: Record<string, string> = {
             'gemini': 'gemini-3.8-flash',
-            'groq': 'qwen/qwen3.6-27b',
-            'openai': 'gpt-5.4',
-            'claude': 'claude-sonnet-4-6',
-            'deepseek': 'deepseek-v4-flash',
-            'natively': 'default',
-            'codex': 'default'
+            'groq': 'qwen/qwen3.8-27b',
+            'openrouter': 'openrouter/free',
+            'natively': 'default'
         };
         return models[provider] || 'default';
     }

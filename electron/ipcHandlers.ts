@@ -3,7 +3,7 @@
 import * as crypto from 'crypto';
 import { AntigravityService, initializeAntigravityLifecycle } from './services/AntigravityService';
 import { buildEmbeddingConfig } from './rag/embeddingConfigIdentity';
-import { app, BrowserWindow, dialog, desktopCapturer, ipcMain, shell, systemPreferences } from 'electron';
+import { app, BrowserWindow, dialog, desktopCapturer, ipcMain, shell, systemPreferences, clipboard } from 'electron';
 import { micSettingsUri } from '../src/lib/micPermissionPolicy.mjs';
 import { TEXT_PLACEHOLDER_RE } from './utils/curlPlaceholderPolicy';
 import * as fs from 'fs';
@@ -296,6 +296,24 @@ export function initializeIpcHandlers(appState: AppState): void {
     ipcMain.on(channel, listener);
   };
 
+  safeHandle('clipboard:write-text', (_event, text: string) => {
+    try {
+      clipboard.writeText(typeof text === 'string' ? text : String(text || ''));
+      return { success: true };
+    } catch (err: any) {
+      console.error('[IpcHandlers] clipboard:write-text failed:', err);
+      return { success: false, error: err?.message };
+    }
+  });
+
+  safeHandle('clipboard:read-text', () => {
+    try {
+      return { success: true, text: clipboard.readText() };
+    } catch (err: any) {
+      return { success: false, text: '' };
+    }
+  });
+
   const broadcastCredentialsChanged = (): void => {
     BrowserWindow.getAllWindows().forEach((win) => {
       if (!win.isDestroyed()) win.webContents.send('credentials-changed');
@@ -476,7 +494,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         : geminiNext ? geminiNext
         : modelAvailable('gpt-5.4') ? 'gpt-5.4'
         : modelAvailable('claude-sonnet-4-6') ? 'claude-sonnet-4-6'
-        : modelAvailable('qwen/qwen3.6-27b') ? 'qwen/qwen3.6-27b'
+        : modelAvailable('qwen/qwen3.8-27b') ? 'qwen/qwen3.8-27b'
         : modelAvailable('deepseek-v4-flash') ? 'deepseek-v4-flash'
         : (codexConfig.enabled === true && codexSignedIn && modelAvailable('codex-cli')) ? 'codex-cli'
         : (litellmFallbackModel && modelAvailable(litellmFallbackModel)) ? litellmFallbackModel

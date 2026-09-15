@@ -1112,6 +1112,10 @@ export class WindowHelper {
       }
     });
 
+    this.launcherWindow.webContents.on('context-menu', (_e, params) => {
+      this.showWebContextMenu(this.launcherWindow!, params);
+    });
+
     this.launcherWindow.on('move', () => {
       if (this.launcherAnimating) return;
       if (this.launcherWindow) {
@@ -1286,6 +1290,10 @@ export class WindowHelper {
         if (!this.appState.getUndetectable()) {
           this.showContextMenu(this.overlayWindow!, point);
         }
+      });
+
+      this.overlayWindow.webContents.on('context-menu', (_e, params) => {
+        this.showWebContextMenu(this.overlayWindow!, params);
       });
 
       // Re-assert always-on-top on blur (Windows only). Screen-sharing tools
@@ -2750,6 +2758,49 @@ export class WindowHelper {
     ];
     const menu = Menu.buildFromTemplate(template);
     menu.popup({ window: win, x: point.x, y: point.y });
+  }
+
+  private showWebContextMenu(win: BrowserWindow, params: Electron.ContextMenuParams): void {
+    if (this.appState.getUndetectable()) return;
+    const template: Electron.MenuItemConstructorOptions[] = [];
+
+    if (params.selectionText && params.selectionText.trim().length > 0) {
+      template.push(
+        { role: 'copy', label: 'Copy' },
+        { type: 'separator' }
+      );
+    }
+
+    if (params.isEditable) {
+      template.push(
+        { role: 'undo', label: 'Undo' },
+        { role: 'redo', label: 'Redo' },
+        { type: 'separator' },
+        { role: 'cut', label: 'Cut' },
+        { role: 'copy', label: 'Copy' },
+        { role: 'paste', label: 'Paste' },
+        { type: 'separator' }
+      );
+    }
+
+    template.push({ role: 'selectAll', label: 'Select All' });
+
+    if (process.env.NODE_ENV === 'development') {
+      template.push(
+        { type: 'separator' },
+        {
+          label: 'Developer Console',
+          click: () => {
+            win.webContents.toggleDevTools();
+          },
+        }
+      );
+    }
+
+    if (template.length > 0) {
+      const menu = Menu.buildFromTemplate(template);
+      menu.popup({ window: win, x: params.x, y: params.y });
+    }
   }
 
   /**

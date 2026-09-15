@@ -71,13 +71,15 @@ export function stripProviderRoutingPrefix(id: string): string {
 // Models ids we treat as cloud regardless of provider hint.
 function isCloudIdentifier(id: string): boolean {
   const s = id.toLowerCase();
+  const bare = s.includes('/') && !s.startsWith('groq/') ? s.slice(s.lastIndexOf('/') + 1) : s;
   if (s === 'natively' || s.startsWith('natively-')) return true;
-  if (s.startsWith('gemini-') || s.startsWith('models/gemini')) return true;
-  if (s.startsWith('gpt-') || s.startsWith('o1-') || s.startsWith('o3-') || s.startsWith('o4-') || s.startsWith('chatgpt-')) return true;
-  if (s.startsWith('claude-')) return true;
+  if (s.startsWith('gemini-') || s.startsWith('models/gemini') || bare.startsWith('gemini-') || bare.startsWith('gemma-')) return true;
+  if (s.startsWith('gpt-') || s.startsWith('o1-') || s.startsWith('o3-') || s.startsWith('o4-') || s.startsWith('chatgpt-') || bare.startsWith('gpt-')) return true;
+  if (s.startsWith('claude-') || bare.startsWith('claude-')) return true;
   // DeepSeek cloud API (OpenAI-compatible). The local Ollama "deepseek-coder"
   // family is handled by the isOllama branch above.
-  if (/^deepseek-v\d/.test(s)) return true;
+  if (/^deepseek-v\d/.test(s) || /^deepseek-v\d/.test(bare)) return true;
+  if (s.startsWith('openrouter/') || s.includes('nemotron') || s.includes('ling-3.0')) return true;
   return false;
 }
 
@@ -94,6 +96,11 @@ function isLargeGroqModel(id: string): boolean {
   if (s.includes('llama-3.3-70b') || s.includes('llama-3.1-70b') || s.includes('llama3-70b')) return true;
   if (s.includes('mixtral-8x7b') || s.includes('mixtral-8x22b')) return true;
   if (s.includes('qwen') && /\b(27b|32b|72b|110b)\b/.test(s)) return true;
+  // Any qwen3.8-family id (e.g. qwen/qwen3.8-8b, qwen/qwen3.8-27b) is at minimum
+  // vision-capable — groqSupportsImages() gates the image flag. Treating the 8B
+  // variant as "small" caused it to skip the groqSupportsImages() check and land
+  // with supportsImages:false, producing the "model doesn't support image" error.
+  if (groqSupportsImages(s)) return true;
   if (s.startsWith('openai/gpt-oss-') || s.startsWith('groq/compound')) return true;
   return false;
 }
@@ -132,7 +139,7 @@ export function parseOllamaSize(id: string): number | null {
 // Vision-capable Ollama families.
 function ollamaSupportsImages(id: string): boolean {
   const s = id.toLowerCase();
-  return /llava|bakllava|moondream|llama3\.2-vision|llama-3\.2-vision|gemma3|minicpm-v|qwen2\.5-vl|qwen2-vl|pixtral/.test(s);
+  return /llava|bakllava|moondream|llama3\.2-vision|llama-3\.2-vision|gemma3|minicpm-v|qwen2\.5-vl|qwen2-vl|qwen3\.(?:[6-9]|\d{2,})|pixtral/.test(s);
 }
 
 export function getModelCapabilities(modelId: string, isOllama: boolean): ModelCapabilities {
@@ -186,8 +193,11 @@ export function getModelCapabilities(modelId: string, isOllama: boolean): ModelC
 
   if (isCloudIdentifier(id)) {
     const b = TIER_BUDGETS['cloud'];
+    const bare = lower.includes('/') && !lower.startsWith('groq/') ? lower.slice(lower.lastIndexOf('/') + 1) : lower;
     const supportsImages = lower.startsWith('gemini-') || lower.startsWith('claude-')
       || lower.startsWith('gpt-4o') || lower.startsWith('gpt-4.1') || lower.startsWith('gpt-5')
+      || bare.startsWith('gemini-') || bare.startsWith('gpt-4o')
+      || lower.includes('-vl') || bare.includes('-vl') || lower.includes('vision') || bare.includes('vision')
       || lower === 'natively' || lower.startsWith('natively-')
       || gatewayVisionHint;
     return {
@@ -224,7 +234,12 @@ export function getModelCapabilities(modelId: string, isOllama: boolean): ModelC
   // are excluded for the same reason, and because this branch also drops the
   // model to the 'tiny' prompt tier and an 8k context — a downgrade that should
   // follow from where the model RUNS, not from a size in its name.
-  if (!isGatewayRouted && /\b(0\.5|1|2|3|4|7|8)b\b|\binstant\b/i.test(lower)) {
+  //
+  // Also exclude vision-capable Groq models: qwen3.8-8b has "8b" in its id and
+  // would match the size regex, but groqSupportsImages() knows it handles images.
+  // Allowing a vision model to fall here would set supportsImages:false and make
+  // Code Hint refuse screenshots with "model doesn't support image".
+  if (!isGatewayRouted && !groqSupportsImages(id) && /\b(0\.5|1|2|3|4|7|8)b\b|\binstant\b/i.test(lower)) {
     const b = TIER_BUDGETS['local-small'];
     return {
       tier: 'local-small',

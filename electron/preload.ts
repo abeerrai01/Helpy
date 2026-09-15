@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, clipboard } from 'electron';
 import type { SkillUploadPayload } from './services/skills/SkillValidator';
 import type { NativelyUsageResponse, NativelyPlansResponse } from '../src/types/nativelyUsage';
 import { PAGE_CAPTURE_FALLBACK_CHANNEL, PAGE_CAPTURE_STARTED_CHANNEL, type PageCaptureFallbackNotice } from './services/pageCaptureFallback';
@@ -64,6 +64,8 @@ type DirectAssistEvent =
 
 // Types for the exposed Electron API
 interface ElectronAPI {
+  writeClipboardText?: (text: string) => Promise<boolean>;
+  readClipboardText?: () => Promise<string>;
   updateContentDimensions: (dimensions: { width: number; height: number }) => Promise<void>;
   updateContentDimensionsCentered: (dimensions: {
     width: number;
@@ -1277,6 +1279,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
   __evalInjectTranscript: (segment: { speaker: string; text: string; timestamp?: number; final?: boolean }) =>
     ipcRenderer.invoke('test-inject-transcript', segment),
   __evalProfileDebug: () => ipcRenderer.invoke('profile:get-status'),
+  writeClipboardText: async (text: string) => {
+    try {
+      if (clipboard && typeof clipboard.writeText === 'function') {
+        clipboard.writeText(typeof text === 'string' ? text : String(text || ''));
+        return true;
+      }
+    } catch { /* fallback to IPC */ }
+    try {
+      const res = await ipcRenderer.invoke('clipboard:write-text', text);
+      return res?.success !== false;
+    } catch {
+      return false;
+    }
+  },
+  readClipboardText: async () => {
+    try {
+      if (clipboard && typeof clipboard.readText === 'function') {
+        return clipboard.readText();
+      }
+    } catch { /* fallback to IPC */ }
+    try {
+      const res = await ipcRenderer.invoke('clipboard:read-text');
+      return res?.text || '';
+    } catch {
+      return '';
+    }
+  },
   updateContentDimensions: (dimensions: { width: number; height: number }) =>
     ipcRenderer.invoke('update-content-dimensions', dimensions),
   updateContentDimensionsCentered: (dimensions: { width: number; height: number }) =>

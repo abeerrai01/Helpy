@@ -8,6 +8,7 @@ export const DIRECT_ASSIST_PROVIDERS = [
   'natively',
   'gemini',
   'openai',
+  'openrouter',
   'claude',
   'groq',
   'deepseek',

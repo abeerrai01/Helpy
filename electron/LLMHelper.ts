@@ -11126,33 +11126,18 @@ let isMultimodal = !!(imagePaths?.length);
    */
   private directFallbackCandidates(): { provider: DirectAssistProvider; model: string }[] {
     const candidates: { provider: DirectAssistProvider; model: string }[] = [
-      { provider: 'natively', model: 'natively' },
       { provider: 'gemini', model: GEMINI_FLASH_MODEL },
-      { provider: 'openai', model: OPENAI_MODEL },
-      { provider: 'claude', model: CLAUDE_MODEL },
+      { provider: 'openrouter', model: OPENROUTER_DEFAULT_MODEL || 'openrouter/free' },
       { provider: 'groq', model: GROQ_MODEL },
-      { provider: 'antigravity', model: this.antigravityFallbackModel() || '' },
-      // Instance field, empty when Ollama is on auto-detect — the filter below
-      // then drops the rung rather than dispatching to a nameless model. Read
-      // defensively: a bare-prototype caller (see the ladder test harness)
-      // never ran the constructor, so the field initializer never set this.
-      { provider: 'ollama', model: this.ollamaModel ?? '' },
     ];
     return candidates.filter((c) => c.model.length > 0);
   }
 
   private directProviderHasCredential(provider: DirectAssistProvider): boolean {
     switch (provider) {
-      case 'natively': return this.hasNatively();
       case 'gemini': return !!(this.client || this.fallbackClients.length > 0);
-      case 'openai': return !!this.openaiClient;
-      case 'claude': return !!this.claudeClient;
+      case 'openrouter': return !!this.openaiClient || !!this.openrouterApiKey;
       case 'groq': return !!this.groqClient;
-      case 'deepseek': return !!this.deepseekClient;
-      case 'nvidia_nim': return !!this.nvidiaNimClient;
-      case 'litellm': return !!this.litellmClient;
-      case 'ollama': return this.useOllama;
-      case 'antigravity': return !!this.antigravityFallbackModel();
       default: return false;
     }
   }
@@ -11239,6 +11224,8 @@ let isMultimodal = !!(imagePaths?.length);
         // an unsupported upstream returns a normal provider error, never a
         // fallback or a text-only retry.
         return true;
+      case 'openrouter':
+        return getModelCapabilities(selection.model, false).supportsImages;
       case 'deepseek':
         return false;
       default:
@@ -11447,6 +11434,13 @@ let isMultimodal = !!(imagePaths?.length);
         yield* this.streamWithGeminiModel(directUserPrompt, model, imagePaths, request.systemPrompt, abortSignal);
         return;
       case 'openai':
+        if (imagePaths.length) {
+          yield* this.streamWithOpenaiMultimodal(directUserPrompt, imagePaths, request.systemPrompt, model, abortSignal);
+        } else {
+          yield* this.streamWithOpenai(directUserPrompt, request.systemPrompt, model, abortSignal);
+        }
+        return;
+      case 'openrouter':
         if (imagePaths.length) {
           yield* this.streamWithOpenaiMultimodal(directUserPrompt, imagePaths, request.systemPrompt, model, abortSignal);
         } else {

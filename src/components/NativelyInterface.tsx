@@ -29,6 +29,7 @@ import { categorizeSttError } from '../lib/sttErrorMapper';
 import { splitGistLine, splitGistLineStreaming, collapseBlockGaps } from '../lib/displayMarkup';
 
 import type { SkillSummary } from '../types/electron';
+import { copyTextToClipboard } from '../utils/clipboard';
 
 function SkillPicker({
   skills,
@@ -167,14 +168,13 @@ const CodeBlockChrome = ({ lang, code }: { lang: string; code: string }) => {
   useEffect(() => () => {
     if (timer.current) clearTimeout(timer.current);
   }, []);
-  const handleCopy = () => {
-    const p = navigator.clipboard?.writeText(code);
-    if (!p) return;
-    p.then(() => {
+  const handleCopy = async () => {
+    const ok = await copyTextToClipboard(code);
+    if (ok) {
       setCopied(true);
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => setCopied(false), 2000);
-    }).catch(() => {});
+    }
   };
   return (
     <div
@@ -6629,7 +6629,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
   // (memoized below) receives this as a prop; without a stable identity its
   // memo comparator would never match and the bailout would not fire.
   const handleCopy = useCallback((text: string) => {
-    navigator.clipboard.writeText(text);
+    void copyTextToClipboard(text);
     analytics.trackCopyAnswer();
     // Optional: Trigger a small toast or state change for visual feedback
   }, []);
@@ -9577,16 +9577,7 @@ Provide only the answer, nothing else.`;
     ]
       .filter(Boolean)
       .join('\n');
-    try {
-      await navigator.clipboard.writeText(report);
-    } catch {
-      const ta = document.createElement('textarea');
-      ta.value = report;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-    }
+    await copyTextToClipboard(report);
   };
 
   // Skill picker: derived from inputValue — open when the user types / or $ followed
@@ -10802,11 +10793,15 @@ Provide only the answer, nothing else.`;
                           if (m === 'gemini-3.6-flash') return 'Gemini 3.6 Flash';
                           if (m === 'gemini-3.1-flash-lite') return 'Gemini 3.1 Flash Lite';
                           if (m === 'gemini-3.1-pro-preview') return 'Gemini 3.1 Pro';
+                          if (m === 'qwen/qwen3.8-27b') return 'Groq Qwen 3.8';
+                          if (m === 'qwen/qwen3.8-8b') return 'Groq Qwen 3.8 (8B)';
                           if (m === 'qwen/qwen3.6-27b') return 'Groq Qwen 3.6';
                           if (m === 'openai/gpt-oss-120b') return 'Groq GPT-OSS 120B';
                           if (m === 'openai/gpt-oss-20b') return 'Groq GPT-OSS 20B';
-                          if (m === 'gpt-5.4') return 'GPT 5.4';
-                          if (m === 'claude-sonnet-4-6') return 'Sonnet 4.6';
+                          if (m === 'openrouter/free') return 'Auto Free (OpenRouter)';
+                          if (m === 'google/gemma-4-31b-it:free') return 'Gemma 4 31B (OpenRouter)';
+                          if (m === 'nvidia/nemotron-3.5-lightning:free') return 'Nemotron 3.5 (OpenRouter)';
+                          if (m === 'inclusionai/ling-3.0-flash-vl:free') return 'Ling 3.0 Flash VL (OpenRouter)';
                           return m;
                         })()}
                       </span>

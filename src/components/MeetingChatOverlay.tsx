@@ -8,6 +8,7 @@ import { registerPrismLanguages } from '../utils/registerPrismLanguages';
 import nativelyIcon from './icon.png';
 import { useResolvedTheme } from '../hooks/useResolvedTheme';
 import { splitGistLineStreaming } from '../lib/displayMarkup';
+import { copyTextToClipboard } from '../utils/clipboard';
 
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -99,12 +100,10 @@ const AssistantMessage: React.FC<{ content: string; isStreaming?: boolean }> = (
     const { body: gistBody, gist: gistLine } = splitGistLineStreaming(content);
 
     const handleCopy = async () => {
-        try {
-            await navigator.clipboard.writeText(gistBody);
+        const ok = await copyTextToClipboard(gistBody);
+        if (ok) {
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
-        } catch (err) {
-            console.error('Failed to copy:', err);
         }
     };
 

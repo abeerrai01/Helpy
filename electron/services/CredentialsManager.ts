@@ -1068,7 +1068,20 @@ export class CredentialsManager {
         // the same prompt (measured), and faster output streaming — the
         // Cluely-class interactive latency target. Full Flash / Pro remain
         // user-selectable for harder problems.
-        return this.storedOrEnv(this.credentials.defaultModel, 'DEFAULT_MODEL') || 'gemini-3.1-flash-lite';
+        const stored = this.storedOrEnv(this.credentials.defaultModel, 'DEFAULT_MODEL') || 'gemini-3.1-flash-lite';
+
+        // One-time migration: qwen/qwen3.6-27b was retired from Groq on 2026-09-16
+        // and replaced by qwen/qwen3.8-27b. Silently rewrite the persisted default
+        // so users who had it selected don't see "model unavailable" on restart.
+        if (stored === 'qwen/qwen3.6-27b') {
+            const replacement = 'qwen/qwen3.8-27b';
+            this.credentials.defaultModel = replacement;
+            try { this.saveCredentials(); } catch { /* non-fatal */ }
+            console.log('[CredentialsManager] Migrated retired default model qwen/qwen3.6-27b → qwen/qwen3.8-27b');
+            return replacement;
+        }
+
+        return stored;
     }
 
     public getVoyageApiKey(): string | undefined {
@@ -1202,7 +1215,7 @@ export class CredentialsManager {
         if (this.getOpenaiApiKey()) return true;                 // gpt-4o / gpt-5 vision
         if (this.getClaudeApiKey()) return true;                 // Claude vision
         if (this.getGeminiApiKey()) return true;                 // Gemini vision
-        if (this.getGroqApiKey()) return true;                   // Groq qwen3.6-27b vision
+        if (this.getGroqApiKey()) return true;                   // Groq qwen3.8-27b vision
         // Custom providers. TWO fixes over the previous `customProviders.some(
         // p => p.multimodal === true)`:
         //   • getAllCustomProviders() — the old read missed the store the
@@ -1683,7 +1696,8 @@ export class CredentialsManager {
                 'gemini', 'llama',
                 'llama-3.3-70b-versatile',
                 'meta-llama/llama-4-scout-17b-16e-instruct',
-                'qwen/qwen3.6-27b',
+                'qwen/qwen3.6-27b',  // retired 2026-09-16
+                'qwen/qwen3.8-27b',
             ]);
             const isAutoDefault = !current
                 || current.startsWith('gemini-')
