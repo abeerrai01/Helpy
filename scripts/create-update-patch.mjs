@@ -95,14 +95,18 @@ if exist "%SCRIPT_DIR%Helpy-Update\\dist" (
 if exist "%TARGET_DIR%\\dist" rmdir /S /Q "%TARGET_DIR%\\dist" >nul 2>&1
 if exist "%TARGET_DIR%\\dist-electron" rmdir /S /Q "%TARGET_DIR%\\dist-electron" >nul 2>&1
 
-xcopy /E /Y /I "%SRC_DIR%\\dist" "%TARGET_DIR%\\dist" >nul
-xcopy /E /Y /I "%SRC_DIR%\\dist-electron" "%TARGET_DIR%\\dist-electron" >nul
-if exist "%SRC_DIR%\\start-helpy.vbs" copy /Y "%SRC_DIR%\\start-helpy.vbs" "%TARGET_DIR%\\start-helpy.vbs" >nul
+xcopy /E /Y /I "%SRC_DIR%\dist" "%TARGET_DIR%\dist" >nul
+xcopy /E /Y /I "%SRC_DIR%\dist-electron" "%TARGET_DIR%\dist-electron" >nul
+if exist "%SRC_DIR%\start-helpy.vbs" copy /Y "%SRC_DIR%\start-helpy.vbs" "%TARGET_DIR%\start-helpy.vbs" >nul
+
+echo 3. Refreshing launcher shortcuts...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $d = [Environment]::GetFolderPath('Desktop'); $s1 = $ws.CreateShortcut((Join-Path $d 'Launch Helpy.lnk')); $s1.TargetPath = (Join-Path '%TARGET_DIR%' 'start-helpy.vbs'); $s1.WorkingDirectory = '%TARGET_DIR%'; if (Test-Path (Join-Path '%TARGET_DIR%' 'node_modules\\electron\\dist\\electron.exe')) { $s1.IconLocation = (Join-Path '%TARGET_DIR%' 'node_modules\\electron\\dist\\electron.exe') + ',0'; }; $s1.Save(); $dl = Join-Path $env:USERPROFILE 'Downloads'; $s2 = $ws.CreateShortcut((Join-Path $dl 'Launch Helpy.lnk')); $s2.TargetPath = (Join-Path '%TARGET_DIR%' 'start-helpy.vbs'); $s2.WorkingDirectory = '%TARGET_DIR%'; if (Test-Path (Join-Path '%TARGET_DIR%' 'node_modules\\electron\\dist\\electron.exe')) { $s2.IconLocation = (Join-Path '%TARGET_DIR%' 'node_modules\\electron\\dist\\electron.exe') + ',0'; }; $s2.Save();" >nul 2>&1
 
 echo.
 echo ========================================================
 echo   SUCCESS: Helpy has been successfully updated!
 echo   All new fixes and features are installed.
+echo   Desktop and Downloads shortcuts have been updated.
 echo   You can now launch Helpy as usual!
 echo ========================================================
 echo.
