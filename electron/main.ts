@@ -6139,60 +6139,38 @@ export class AppState {
    * wait uses this to decide between its short grace and its full window.
    */
   public finalizeMicSTT(): { pending: boolean } {
-    // We only want to finalize the user microphone, because the context is Manual Answer
+    let pending = false;
     if (this.googleSTT_User?.finalize) {
-      console.log('[Main] Finalizing STT');
+      console.log('[Main] Finalizing user STT');
       const r: unknown = this.googleSTT_User.finalize();
-      return { pending: r === true };
+      if (r === true) pending = true;
     }
-    return { pending: false };
+    if (this.googleSTT?.finalize) {
+      console.log('[Main] Finalizing interviewer STT');
+      const r: unknown = this.googleSTT.finalize();
+      if (r === true) pending = true;
+    }
+    return { pending };
   }
 
   /**
-   * Ensure the microphone capture pipeline is initialized and running so the
+   * Ensure the microphone and system audio capture pipelines are initialized and running so the
    * Answer button works in standalone / launcher mode (i.e. outside an active
    * meeting). `setupSystemAudioPipeline` is idempotent — if the pipeline was
    * already created for the current meeting it is a safe no-op. Likewise,
-   * `MicrophoneCapture.start()` and `STTProvider.start()` are guarded by their
-   * own `isActive` flags, so calling this while a meeting is already live has
-   * no effect.
+   * capture channels are guarded by their own `isActive` / `isRecording` flags,
+   * so calling this while a meeting is already live has no effect.
    *
-   * Called by the renderer when the user presses the Answer (mic) button. The
-   * prior behaviour was to expect the pipeline to be running already — which
-   * was only true after `startMeeting`, so standalone Answer always produced
-   * "No speech detected".
+   * Called by the renderer when the user presses the Answer (listening) button.
    */
   public async startMicRecording(): Promise<void> {
     try {
-      // Build MicrophoneCapture + googleSTT_User if not yet created.
+      // Build MicrophoneCapture + googleSTT_User and SystemAudioCapture + googleSTT if not yet created.
       await this.setupSystemAudioPipeline();
 
-      // Start only the mic channel. If already started (meeting active) these
-      // guards inside start() make the calls no-ops.
-      if (this.microphoneCapture && !(this.microphoneCapture as any).isActive) {
-        try {
-          this.microphoneCapture.start();
-        } catch (err) {
-          console.error('[Main] startMicRecording: microphoneCapture.start() threw:', err);
-          this.sendAudioCaptureFailed({
-            channel: 'mic',
-            message: `Microphone failed to start: ${(err as Error)?.message ?? 'unknown error'}. Check that no other app holds the mic exclusively.`,
-            attempt: 0,
-            maxAttempts: 0,
-            terminal: true,
-            stuck: false,
-          });
-          return;
-        }
-      }
-      if (this.googleSTT_User && !(this.googleSTT_User as any).isActive) {
-        try {
-          this.googleSTT_User.start();
-        } catch (err) {
-          console.error('[Main] startMicRecording: googleSTT_User.start() threw:', err);
-        }
-      }
-      console.log('[Main] startMicRecording: mic channel ready.');
+      // Start both mic and system audio channels (idempotent, safe).
+      this.startCaptureChannels('startMicRecording');
+      console.log('[Main] startMicRecording: mic and system capture channels ready.');
     } catch (err) {
       console.error('[Main] startMicRecording failed:', err);
     }

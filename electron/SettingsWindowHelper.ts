@@ -119,7 +119,7 @@ export class SettingsWindowHelper {
 
         // Set parent to ensure it stays on top of the correct window
         const mainWin = this.windowHelper?.getMainWindow();
-        if (mainWin && !mainWin.isDestroyed()) {
+        if (process.platform === 'darwin' && mainWin && !mainWin.isDestroyed()) {
             this.settingsWindow.setParentWindow(mainWin);
         }
 
@@ -130,23 +130,12 @@ export class SettingsWindowHelper {
         // Ensure fully visible on screen
         this.ensureVisibleOnScreen();
 
-        if (process.platform === 'win32' && this.contentProtection) {
-            this.settingsWindow.setOpacity(0);
-            if (activate) this.settingsWindow.show(); else this.settingsWindow.showInactive();
-            this.settingsWindow.setContentProtection(true);
-
-            if (this.opacityTimeout) clearTimeout(this.opacityTimeout);
-            this.opacityTimeout = setTimeout(() => {
-                if (this.settingsWindow && !this.settingsWindow.isDestroyed()) {
-                    this.settingsWindow.setOpacity(1);
-                    if (activate) this.settingsWindow.focus();
-                }
-            }, 60);
-        } else {
-            this.settingsWindow.setContentProtection(this.contentProtection);
-            if (activate) this.settingsWindow.show(); else this.settingsWindow.showInactive();
-            if (activate) this.settingsWindow.focus();
+        this.setContentProtection(this.contentProtection);
+        if (this.settingsWindow && !this.settingsWindow.isDestroyed()) {
+            this.settingsWindow.setOpacity(1);
         }
+        if (activate) this.settingsWindow.show(); else this.settingsWindow.showInactive();
+        if (activate) this.settingsWindow.focus();
 
         this.emitVisibilityChange(true);
 
@@ -184,7 +173,10 @@ export class SettingsWindowHelper {
 
     public closeWindow(): void {
         if (this.settingsWindow && !this.settingsWindow.isDestroyed()) {
-            this.settingsWindow.hide()
+            if (process.platform === 'darwin') {
+                this.settingsWindow.setParentWindow(null);
+            }
+            this.settingsWindow.hide();
             this.emitVisibilityChange(false);
         }
     }
@@ -385,7 +377,7 @@ export class SettingsWindowHelper {
     public syncActivationPolicy(): void {
         if (process.platform !== 'win32') return;
         if (!this.settingsWindow || this.settingsWindow.isDestroyed()) return;
-        this.settingsWindow.setContentProtection(this.contentProtection);
+        this.setContentProtection(this.contentProtection);
         if (this.settingsWindow.isVisible()) {
             this.settingsWindow.setOpacity(1);
         }

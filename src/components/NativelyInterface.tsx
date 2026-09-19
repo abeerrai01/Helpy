@@ -570,6 +570,11 @@ const buildDirectAssistHistoryFromMessages = (items: Message[]): DirectAssistHis
         role: 'assistant',
         content: m.text.trim(),
       });
+    } else if (m.role === 'interviewer') {
+      turns.push({
+        role: 'user',
+        content: `Interviewer: ${m.text.trim()}`,
+      });
     }
   }
   return turns.slice(-24);
@@ -6179,9 +6184,9 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     // Real-time Transcripts
     cleanups.push(
       window.electronAPI.onNativeAudioTranscript((transcript) => {
-        // When Answer button is active, capture USER transcripts for voice input
+        // When Answer button is active, capture speech (user mic OR interviewer from Teams/Meet) for voice input
         // Use ref to avoid stale closure issue
-        if (isRecordingRef.current && transcript.speaker === 'user') {
+        if (isRecordingRef.current && (transcript.speaker === 'user' || transcript.speaker === 'interviewer')) {
           if (transcript.final) {
             // Accumulate final transcripts, collapsing STT overlap/re-transcription
             // races (RC5, docs/context-rebuild/03_LIVE_REPRO_FINDINGS.md item 4)
@@ -6205,6 +6210,25 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
             // Show live partial transcript
             setManualTranscript(transcript.text);
             manualTranscriptRef.current = transcript.text;
+          }
+
+          // If speaker is interviewer, also keep the top rolling transcript bar updated
+          if (transcript.speaker === 'interviewer') {
+            if (!transcript.final) {
+              if (!interviewerSpeakingRef.current) {
+                interviewerSpeakingRef.current = true;
+                setIsInterviewerSpeaking(true);
+              }
+              applyRollingPartialPreview(transcript.text);
+            } else {
+              flushRollingPartialPreview();
+              interviewerSpeakingRef.current = false;
+              setIsInterviewerSpeaking(false);
+              setRollingTranscript((prev) => mergeRollingTranscriptFinal(prev, transcript.text));
+              setTimeout(() => {
+                setIsInterviewerSpeaking(false);
+              }, 3000);
+            }
           }
           return; // Don't add to messages while recording
         }
@@ -7659,6 +7683,11 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
 
   const handleAnswerNow = async () => {
     if (isManualRecording) {
+      if (answerStopInFlightRef.current) {
+        // Stop is already in flight — force immediate answer on repeat press
+        answerTailWaiterRef.current?.notifyFinal();
+        return;
+      }
       if (!tryBeginOverlayAction('answer_now')) return;
       try {
         // Stop recording - send accumulated voice input to Gemini.
@@ -7697,6 +7726,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         await answerTailWaiterRef.current!.wait({
           hasCapturedFinal: voiceInputRef.current.trim().length > 0,
           hasPendingInterim: manualTranscriptRef.current.trim().length > 0 || providerReportsPending,
+          maxWaitMs: providerReportsPending ? 4000 : undefined,
         });
         isRecordingRef.current = false;
         answerStopInFlightRef.current = false;
@@ -7706,18 +7736,29 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         const currentAttachments = attachedContext;
         setAttachedContext([]);
 
+        const recentInterviewerSpeech = currentAttachments.length === 0
+          ? (pendingRollingPartialRef.current
+              ? mergeRollingTranscriptPartial(rollingTranscript, pendingRollingPartialRef.current)
+              : rollingTranscript
+            )
+              .split('  ·  ')
+              .slice(-2)
+              .join('  ·  ')
+              .trim()
+          : '';
+
         const question = mergeTranscriptChunks(
           voiceInputRef.current,
           manualTranscriptRef.current,
-        ).trim();
+        ).trim() || recentInterviewerSpeech;
         setVoiceInput('');
         voiceInputRef.current = '';
         setManualTranscript('');
         manualTranscriptRef.current = '';
 
         if (!question && currentAttachments.length === 0) {
-          if (sttUserStatus === 'failed' && sttUserError) {
-            const errCat = categorizeSttError(sttUserError);
+          if ((sttUserStatus === 'failed' && sttUserError) || (sttInterviewerStatus === 'failed' && sttInterviewerError)) {
+            const errCat = categorizeSttError(sttUserError || sttInterviewerError);
             setMessages((prev) => [
               ...prev,
               {
@@ -7726,7 +7767,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
                 text: `❌ ${errCat.title}: ${errCat.body}`,
               },
             ]);
-          } else if (sttUserStatus === 'reconnecting') {
+          } else if (sttUserStatus === 'reconnecting' || sttInterviewerStatus === 'reconnecting') {
             setMessages((prev) => [
               ...prev,
               {
@@ -7741,7 +7782,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
               {
                 id: genMessageId(),
                 role: 'system',
-                text: '⚠️ No speech detected. Try speaking closer to your microphone.',
+                text: '⚠️ No speech detected. Try speaking closer to your microphone or ensure meeting audio is playing.',
               },
             ]);
           }
@@ -7824,13 +7865,23 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
           let prompt = '';
 
           if (currentAttachments.length > 0) {
-            prompt = `You are a helper. The user has provided a screenshot and a spoken question/command.
+            prompt = `You are a real-time interview assistant. The user has provided a screenshot and a question/command from an interview.
 User said: "${question}"
 
-Instructions:
-1. Analyze the screenshot in the context of what the user said.
-2. Provide a direct, helpful answer.
-3. Be concise.`;
+CRITICAL INSTRUCTIONS:
+1. CODING, SCRIPTING & TECHNICAL IMPLEMENTATION:
+   If the screenshot or question asks for code, a script, an algorithm, SQL query, or technical implementation:
+   - Provide the COMPLETE, fully working, and runnable code or script in a fenced Markdown code block with language identifier (e.g. \`\`\`python, \`\`\`bash, \`\`\`javascript).
+   - Long, complete answers with full code are REQUIRED. Never truncate, never omit logic, and never use placeholders like "// TODO" or "...".
+   - After the code block, provide a brief 1-2 sentence spoken summary of the approach and time/space complexity that the user can say out loud.
+
+2. GENERAL INTERVIEW, CONCEPTUAL & BEHAVIORAL QUESTIONS:
+   For all non-coding questions (concepts, explanations, behavioral, architecture, or definitions):
+   - The user must speak your answer out loud to their interviewer in real time. Long responses are NOT wanted.
+   - STRICT LENGTH: Exactly 2 to 4 sentences (under 60 words). Concise, adequate, and direct.
+   - Start immediately with the answer. No preamble ("Based on the screenshot...", "Certainly"), no pleasantries, and no bullet points or markdown headings.
+
+Provide only the answer, nothing else.`;
           } else {
             const ragResult = await window.electronAPI.ragQueryLive?.(question);
             if (ragResult?.success) {
@@ -7838,12 +7889,20 @@ Instructions:
             }
 
             prompt = `You are a real-time interview assistant. The user just repeated or paraphrased a question from their interviewer.
-Instructions:
-1. Extract the core question being asked
-2. Provide a clear, concise, and professional answer that the user can say out loud
-3. Keep the answer conversational but informative (2-4 sentences ideal)
-4. Do NOT include phrases like "The question is..." - just give the answer directly
-5. Format for speaking out loud, not for reading
+Question: "${question}"
+
+CRITICAL INSTRUCTIONS:
+1. CODING, SCRIPTING & TECHNICAL IMPLEMENTATION:
+   If the question asks to write code, a script (Python, Bash, etc.), an algorithm, a database query, or technical implementation:
+   - Provide the COMPLETE, fully working, and runnable code or script in a fenced Markdown code block with language identifier (e.g. \`\`\`python, \`\`\`bash, \`\`\`sql).
+   - Long, complete answers with full code are REQUIRED. Never truncate, never omit logic, and never use placeholders like "// TODO" or "...".
+   - After the code block, provide a brief 1-2 sentence spoken summary of the approach and time/space complexity that the user can say out loud.
+
+2. GENERAL INTERVIEW, CONCEPTUAL & BEHAVIORAL QUESTIONS:
+   For all other questions (conceptual explanations, behavioral questions, architecture discussions, or definitions):
+   - The user must speak your response aloud directly to the interviewer. Long responses are NOT wanted.
+   - STRICT LENGTH: Exactly 2 to 4 sentences (strictly under 60 words). Adequate, punchy, and concise.
+   - Start immediately with the direct answer. No introductory filler ("The question is...", "Sure, I can answer that"), no closing remarks, and no bullet points or markdown headings.
 
 Provide only the answer, nothing else.`;
           }

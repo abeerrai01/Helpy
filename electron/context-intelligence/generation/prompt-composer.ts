@@ -195,7 +195,7 @@ const PERMANENT_RULES = [
     + '"based on the provided context", "the reference file states"). State the fact directly; '
     + 'name a source only when the source itself is the point.',
   'Keep it short enough to say out loud: aim for two to four sentences unless the question '
-    + 'genuinely requires a list or code.',
+    + 'genuinely requires a list or code. For coding and scripting tasks, provide the complete, fully runnable code.',
 ].join('\n- ');
 
 function authorityRules(d: Readonly<TurnDecision>): string {

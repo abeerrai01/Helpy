@@ -1660,7 +1660,18 @@ export class WindowHelper {
       },
       ...(isMac ? { type: 'panel' as const } : {}),
     });
-    this.popoverCatcher.setContentProtection(this.contentProtection);
+    if (process.platform === 'win32') {
+      // On Windows, the popover catcher covers the entire display bounds (e.g. 1920x1080).
+      // Calling native setContentProtection(true) (SetWindowDisplayAffinity) on a monitor-sized
+      // window causes Windows screen capture (Desktop Duplication API in Zoom, Teams, Meet)
+      // to paint a solid black rectangle over the entire screen for the duration the popover is open.
+      // Furthermore, toggling display affinity on a monitor-sized window causes DWM capture reset
+      // (1-2s blank screen). Since the catcher is 100% transparent with zero UI pixels, it has
+      // no secret text/pixels to protect, so keeping native affinity off avoids blanking the screenshare.
+      this.popoverCatcher.setContentProtection = () => {};
+    } else {
+      this.popoverCatcher.setContentProtection(this.contentProtection);
+    }
     if (isMac) {
       this.popoverCatcher.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
       this.popoverCatcher.setHiddenInMissionControl(true);

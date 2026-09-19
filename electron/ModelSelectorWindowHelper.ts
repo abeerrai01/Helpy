@@ -60,7 +60,7 @@ export class ModelSelectorWindowHelper {
         const mainWin = this.windowHelper?.getMainWindow();
         const isOverlay = mainWin === this.windowHelper?.getOverlayWindow();
 
-        if (mainWin && !mainWin.isDestroyed()) {
+        if (process.platform === "darwin" && mainWin && !mainWin.isDestroyed()) {
             this.window.setParentWindow(mainWin);
         }
 
@@ -95,28 +95,19 @@ export class ModelSelectorWindowHelper {
         }
         this.windowHelper?.notifyOverlayPopover?.('model', this.overlayAnchor !== null);
 
-        if (process.platform === 'win32' && this.contentProtection) {
-            this.window.setOpacity(0);
-            if (activate) this.window.show(); else this.window.showInactive();
-            this.window.setContentProtection(true);
-
-            if (this.opacityTimeout) clearTimeout(this.opacityTimeout);
-            this.opacityTimeout = setTimeout(() => {
-                if (this.window && !this.window.isDestroyed()) {
-                    this.window.setOpacity(1);
-                    if (activate) this.window.focus();
-                }
-            }, 60);
-        } else {
-            this.window.setContentProtection(this.contentProtection);
-            if (activate) this.window.show(); else this.window.showInactive();
-            if (activate) this.window.focus();
+        this.setContentProtection(this.contentProtection);
+        if (this.window && !this.window.isDestroyed()) {
+            this.window.setOpacity(1);
         }
+        if (activate) this.window.show(); else this.window.showInactive();
+        if (activate) this.window.focus();
     }
 
     public hideWindow(): void {
         if (this.window && !this.window.isDestroyed()) {
-            this.window.setParentWindow(null);
+            if (process.platform === "darwin") {
+                this.window.setParentWindow(null);
+            }
             this.window.hide();
             // Do NOT call mainWin.focus() here — the model selector is a floating dropdown.
             // Explicitly focusing the main window steals OS focus from whatever the user
@@ -341,7 +332,7 @@ export class ModelSelectorWindowHelper {
     public syncActivationPolicy(): void {
         if (process.platform !== 'win32') return;
         if (!this.window || this.window.isDestroyed()) return;
-        this.window.setContentProtection(this.contentProtection);
+        this.setContentProtection(this.contentProtection);
         if (this.window.isVisible()) {
             this.window.setOpacity(1);
         }

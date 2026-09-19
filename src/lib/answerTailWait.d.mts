@@ -2,7 +2,12 @@ export const TAIL_WAIT_MS: number;
 export const TAIL_GRACE_MS: number;
 export interface TranscriptTailWaiter {
   notifyFinal(): void;
-  wait(state: { hasCapturedFinal: boolean; hasPendingInterim: boolean }): Promise<'final' | 'timeout'>;
+  wait(state?: {
+    hasCapturedFinal?: boolean;
+    hasPendingInterim?: boolean;
+    maxWaitMs?: number;
+    graceMs?: number;
+  }): Promise<'final' | 'timeout'>;
 }
 export function createTranscriptTailWaiter(timers?: {
   setTimeout: (fn: () => void, ms: number) => unknown;

@@ -26,7 +26,11 @@ If Not FSO.FileExists(ScriptDir & "\dist\index.html") Then
 End If
 
 ' Launch Electron completely hidden (0 = SW_HIDE, False = asynchronous)
-WshShell.Run "cmd /c """ & ScriptDir & "\node_modules\.bin\electron.cmd"" .", 0, False
+If FSO.FileExists(ScriptDir & "\node_modules\electron\dist\electron.exe") Then
+    WshShell.Run """" & ScriptDir & "\node_modules\electron\dist\electron.exe"" """ & ScriptDir & """", 0, False
+Else
+    WshShell.Run "cmd /c """ & ScriptDir & "\node_modules\.bin\electron.cmd"" .", 0, False
+End If
 
 Set WshShell = Nothing
 Set FSO = Nothing
