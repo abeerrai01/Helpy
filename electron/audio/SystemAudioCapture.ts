@@ -32,6 +32,10 @@ export class SystemAudioCapture extends EventEmitter {
         }
     }
 
+    public get isActive(): boolean {
+        return this.isRecording;
+    }
+
     /**
      * The EMITTED sample rate handed to STT — canonical 16000 after the DSP
      * resampler (or the native rate if resampling was unavailable). Declare THIS

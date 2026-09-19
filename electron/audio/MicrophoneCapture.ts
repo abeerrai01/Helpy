@@ -60,6 +60,10 @@ export class MicrophoneCapture extends EventEmitter {
         }
     }
 
+    public get isActive(): boolean {
+        return this.isRecording;
+    }
+
     public getSampleRate(): number {
         if (this.monitor) {
             // NAPI-RS V3 auto-converts Rust snake_case to camelCase

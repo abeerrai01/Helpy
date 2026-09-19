@@ -3502,12 +3502,10 @@ export class AppState {
       // when the Answer gate is closed. Blocking them here was silently
       // swallowing the entire transcript and producing "No speech detected".
       //
-      // Interviewer (system audio): only accept while a meeting is active OR
-      // while draining trailing finals after Stop. `_isDraining` covers the
-      // ~250 ms grace window between Stop click and STT socket close so the
-      // last sentence isn't silently dropped. Without this gate the idle
-      // system-audio channel produces noise transcripts in the UI.
-      if (speaker !== 'user' && !this.isMeetingActive && !this._isDraining) {
+      // Interviewer (system audio): accept while a meeting is active,
+      // while system audio capture is actively running, or while draining trailing finals after Stop.
+      const sysActive = !!(this.systemAudioCapture as any)?.isRecording || !!(this.systemAudioCapture as any)?.isActive;
+      if (speaker !== 'user' && !this.isMeetingActive && !sysActive && !this._isDraining) {
         return;
       }
 
@@ -6165,6 +6163,7 @@ export class AppState {
    */
   public async startMicRecording(): Promise<void> {
     try {
+      this.isMeetingActive = true;
       // Build MicrophoneCapture + googleSTT_User and SystemAudioCapture + googleSTT if not yet created.
       await this.setupSystemAudioPipeline();
 

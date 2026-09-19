@@ -1704,6 +1704,10 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
   const pinAnswerPanelRef = useRef<() => void>(() => {});
   const [voiceInput, setVoiceInput] = useState(''); // Accumulated user voice input
   const voiceInputRef = useRef<string>(''); // Ref for capturing in async handlers
+  const [recordingInterviewerSpeech, setRecordingInterviewerSpeech] = useState('');
+  const recordingInterviewerSpeechRef = useRef<string>('');
+  const [interviewerPartial, setInterviewerPartial] = useState('');
+  const interviewerPartialRef = useRef<string>('');
   const textInputRef = useRef<HTMLInputElement>(null); // Ref for input focus
   const isStealthRef = useRef<boolean>(false); // Tracks if the next expansion should be stealthy
   // Startup-flicker guards (restored from 2de1b62, reverted by 18b139b):
@@ -4444,6 +4448,10 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
       // recording must not prepend its words to the next meeting's question.
       manualTranscriptRef.current = '';
       voiceInputRef.current = '';
+      recordingInterviewerSpeechRef.current = '';
+      setRecordingInterviewerSpeech('');
+      interviewerPartialRef.current = '';
+      setInterviewerPartial('');
       isRecordingRef.current = false;
       answerStopInFlightRef.current = false;
       setIsManualRecording(false);
@@ -6184,21 +6192,13 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     // Real-time Transcripts
     cleanups.push(
       window.electronAPI.onNativeAudioTranscript((transcript) => {
-        // When Answer button is active, capture speech (user mic OR interviewer from Teams/Meet) for voice input
+        // When Answer button is active, capture speech for voice input
         // Use ref to avoid stale closure issue
-        if (isRecordingRef.current && (transcript.speaker === 'user' || transcript.speaker === 'interviewer')) {
+        if (isRecordingRef.current && transcript.speaker === 'user') {
           if (transcript.final) {
             // Accumulate final transcripts, collapsing STT overlap/re-transcription
             // races (RC5, docs/context-rebuild/03_LIVE_REPRO_FINDINGS.md item 4)
             // instead of blindly concatenating.
-            //
-            // The ref is the source of truth and is written SYNCHRONOUSLY, with
-            // the state set from the same value. It used to be written inside
-            // the setVoiceInput updater, which React runs lazily on the next
-            // render — so a Stop press woken by notifyFinal() below snapshotted
-            // the ref before React had applied the merge and still saw ''
-            // (live-reproduced 2026-09-11 with an injected final: the waiter
-            // resolved 'final' with voice "").
             const updated = mergeTranscriptChunks(voiceInputRef.current, transcript.text);
             voiceInputRef.current = updated;
             setVoiceInput(updated);
@@ -6211,24 +6211,31 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
             setManualTranscript(transcript.text);
             manualTranscriptRef.current = transcript.text;
           }
+          return;
+        }
 
-          // If speaker is interviewer, also keep the top rolling transcript bar updated
-          if (transcript.speaker === 'interviewer') {
-            if (!transcript.final) {
-              if (!interviewerSpeakingRef.current) {
-                interviewerSpeakingRef.current = true;
-                setIsInterviewerSpeaking(true);
-              }
-              applyRollingPartialPreview(transcript.text);
-            } else {
-              flushRollingPartialPreview();
-              interviewerSpeakingRef.current = false;
+        if (isRecordingRef.current && transcript.speaker === 'interviewer') {
+          if (transcript.final) {
+            const updated = mergeTranscriptChunks(recordingInterviewerSpeechRef.current, transcript.text);
+            recordingInterviewerSpeechRef.current = updated;
+            setRecordingInterviewerSpeech(updated);
+            interviewerPartialRef.current = '';
+            setInterviewerPartial('');
+            flushRollingPartialPreview();
+            interviewerSpeakingRef.current = false;
+            setIsInterviewerSpeaking(false);
+            setRollingTranscript((prev) => mergeRollingTranscriptFinal(prev, transcript.text));
+            setTimeout(() => {
               setIsInterviewerSpeaking(false);
-              setRollingTranscript((prev) => mergeRollingTranscriptFinal(prev, transcript.text));
-              setTimeout(() => {
-                setIsInterviewerSpeaking(false);
-              }, 3000);
+            }, 3000);
+          } else {
+            interviewerPartialRef.current = transcript.text;
+            setInterviewerPartial(transcript.text);
+            if (!interviewerSpeakingRef.current) {
+              interviewerSpeakingRef.current = true;
+              setIsInterviewerSpeaking(true);
             }
+            applyRollingPartialPreview(transcript.text);
           }
           return; // Don't add to messages while recording
         }
@@ -7736,25 +7743,38 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         const currentAttachments = attachedContext;
         setAttachedContext([]);
 
-        const recentInterviewerSpeech = currentAttachments.length === 0
-          ? (pendingRollingPartialRef.current
-              ? mergeRollingTranscriptPartial(rollingTranscript, pendingRollingPartialRef.current)
-              : rollingTranscript
-            )
-              .split('  ·  ')
-              .slice(-2)
-              .join('  ·  ')
-              .trim()
-          : '';
+        const recentInterviewerSpeech = (
+          recordingInterviewerSpeechRef.current ||
+          (pendingRollingPartialRef.current
+            ? mergeRollingTranscriptPartial(rollingTranscript, pendingRollingPartialRef.current)
+            : rollingTranscript
+          )
+            .split('  ·  ')
+            .slice(-6)
+            .join(' ')
+            .trim()
+        ).trim();
 
         const question = mergeTranscriptChunks(
           voiceInputRef.current,
           manualTranscriptRef.current,
-        ).trim() || recentInterviewerSpeech;
+        ).trim() ? (() => {
+          const speech = mergeTranscriptChunks(voiceInputRef.current, manualTranscriptRef.current).trim();
+          if (recentInterviewerSpeech && speech) {
+            if (speech.toLowerCase().includes(recentInterviewerSpeech.toLowerCase())) return speech;
+            const isFiller = /^(answer(\s+(this|that|the\s+question))?|tell\s+me|solve\s+(this|that)?|what\s+is\s+the\s+answer|help(\s+me)?|can\s+you\s+answer|give\s+me\s+(the\s+)?answer|yes|yeah|okay|ok|um+|uh+)\.?$/i.test(speech) || speech.split(/\s+/).length <= 2;
+            return isFiller ? recentInterviewerSpeech : `${recentInterviewerSpeech}\n\nCandidate notes: ${speech}`;
+          }
+          return speech || recentInterviewerSpeech;
+        })() : recentInterviewerSpeech;
         setVoiceInput('');
         voiceInputRef.current = '';
         setManualTranscript('');
         manualTranscriptRef.current = '';
+        setRecordingInterviewerSpeech('');
+        recordingInterviewerSpeechRef.current = '';
+        setInterviewerPartial('');
+        interviewerPartialRef.current = '';
 
         if (!question && currentAttachments.length === 0) {
           if ((sttUserStatus === 'failed' && sttUserError) || (sttInterviewerStatus === 'failed' && sttInterviewerError)) {
@@ -7961,6 +7981,19 @@ Provide only the answer, nothing else.`;
       setVoiceInput('');
       voiceInputRef.current = '';
       setManualTranscript('');
+      manualTranscriptRef.current = '';
+      const initialInterviewer = (pendingRollingPartialRef.current
+        ? mergeRollingTranscriptPartial(rollingTranscript, pendingRollingPartialRef.current)
+        : rollingTranscript
+      )
+        .split('  ·  ')
+        .slice(-6)
+        .join(' ')
+        .trim();
+      recordingInterviewerSpeechRef.current = initialInterviewer;
+      setRecordingInterviewerSpeech(initialInterviewer);
+      interviewerPartialRef.current = '';
+      setInterviewerPartial('');
       isRecordingRef.current = true; // Update ref immediately
       setIsManualRecording(true);
 
@@ -10179,13 +10212,24 @@ Provide only the answer, nothing else.`;
                   {isManualRecording && (
                     <div className="flex flex-col items-end gap-1 animate-in fade-in slide-in-from-bottom-2 duration-300">
                       {/* Live transcription preview */}
-                      {(manualTranscript || voiceInput) && (
-                        <div className="max-w-[85%] px-3.5 py-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-[18px] rounded-tr-[4px]">
-                          <span className="text-[13px] text-emerald-300">
-                            {voiceInput}
-                            {voiceInput && manualTranscript ? ' ' : ''}
-                            {manualTranscript}
-                          </span>
+                      {(recordingInterviewerSpeech || interviewerPartial || voiceInput || manualTranscript) && (
+                        <div className="max-w-[85%] px-3.5 py-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-[18px] rounded-tr-[4px] space-y-1">
+                          {(recordingInterviewerSpeech || interviewerPartial) && (
+                            <div className="text-[12px] text-emerald-300/90 leading-relaxed">
+                              <span className="font-semibold text-emerald-400 mr-1.5">Interviewer:</span>
+                              {recordingInterviewerSpeech}
+                              {recordingInterviewerSpeech && interviewerPartial ? ' ' : ''}
+                              {interviewerPartial}
+                            </div>
+                          )}
+                          {(voiceInput || manualTranscript) && (
+                            <div className="text-[12px] text-emerald-200 leading-relaxed">
+                              <span className="font-semibold text-emerald-400 mr-1.5">You:</span>
+                              {voiceInput}
+                              {voiceInput && manualTranscript ? ' ' : ''}
+                              {manualTranscript}
+                            </div>
+                          )}
                         </div>
                       )}
                       <div className="px-3 py-2 flex gap-1.5 items-center bg-emerald-500/10 border border-emerald-500/20 rounded-full">
