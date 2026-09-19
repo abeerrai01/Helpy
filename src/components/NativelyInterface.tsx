@@ -6225,6 +6225,8 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
             interviewerSpeakingRef.current = false;
             setIsInterviewerSpeaking(false);
             setRollingTranscript((prev) => mergeRollingTranscriptFinal(prev, transcript.text));
+            // A Stop press may be waiting for this interviewer final chunk
+            answerTailWaiterRef.current?.notifyFinal();
             setTimeout(() => {
               setIsInterviewerSpeaking(false);
             }, 3000);
@@ -7731,9 +7733,9 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         // Event-driven: resolves the moment a FINAL user chunk is merged, and
         // is bounded so an empty recording still returns promptly.
         await answerTailWaiterRef.current!.wait({
-          hasCapturedFinal: voiceInputRef.current.trim().length > 0,
-          hasPendingInterim: manualTranscriptRef.current.trim().length > 0 || providerReportsPending,
-          maxWaitMs: providerReportsPending ? 4000 : undefined,
+          hasCapturedFinal: voiceInputRef.current.trim().length > 0 || recordingInterviewerSpeechRef.current.trim().length > 0,
+          hasPendingInterim: manualTranscriptRef.current.trim().length > 0 || providerReportsPending || interviewerPartialRef.current.trim().length > 0,
+          maxWaitMs: providerReportsPending ? 8000 : (interviewerPartialRef.current.trim().length > 0 ? 6000 : undefined),
         });
         isRecordingRef.current = false;
         answerStopInFlightRef.current = false;

@@ -10,7 +10,7 @@ const { SystemAudioCapture: RustAudioCapture } = NativeModule || {};
 export class SystemAudioCapture extends EventEmitter {
     private isRecording: boolean = false;
     private deviceId: string | null = null;
-    private detectedSampleRate: number = 48000;
+    private detectedSampleRate: number = 16000;
     private monitor: any = null;
     private chunkCount: number = 0;
     private sampleRatePollTimers: NodeJS.Timeout[] = [];

@@ -89,7 +89,7 @@ import { RECOGNITION_LANGUAGES } from '../config/languages';
 
 export class LocalWhisperSTT extends EventEmitter {
     private readonly modelId: string;
-    private inputSampleRate = 48000;
+    private inputSampleRate = 16000;
     private language = 'auto';
     // Optional context-biasing prompt sent out-of-band to the worker via
     // `setPrompt` messages. The worker tokenizes once and reuses the IDs
@@ -334,7 +334,11 @@ export class LocalWhisperSTT extends EventEmitter {
         return { intervalMs: 1500, minAudioMs: 800, skipAgreement: false };
     }
 
-    setSampleRate(rate: number): void { this.inputSampleRate = rate; }
+    setSampleRate(rate: number): void {
+        if (typeof rate === 'number' && rate > 0) {
+            this.inputSampleRate = rate;
+        }
+    }
     setAudioChannelCount(_count: number): void {}
     setRecognitionLanguage(key: string): void {
         this.language = key || 'auto';

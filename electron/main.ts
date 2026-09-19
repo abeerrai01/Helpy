@@ -3449,6 +3449,8 @@ export class AppState {
     }
 
     stt.setRecognitionLanguage(sttLanguage);
+    stt.setSampleRate?.(16000);
+    stt.setAudioChannelCount?.(1);
 
     // WTA audit F9 (2026-08-18): effective provider id for punctuation
     // provenance — derived from the CONSTRUCTED instance, not the settings
@@ -4208,7 +4210,8 @@ export class AppState {
         // STT WS connected, the user saw "Listening for audio…" forever, and
         // no banner ever surfaced.
         try {
-          this.systemAudioCapture = new SystemAudioCapture();
+          const configuredOutput = SettingsManager.getInstance().get('selectedOutputDevice') || null;
+          this.systemAudioCapture = new SystemAudioCapture(configuredOutput);
           this.wireSystemCapture(this.systemAudioCapture);
           // Transparency: tell the renderer which device is actually being captured
           // even on the no-metadata default path. Previously only reconfigureAudio
@@ -4217,8 +4220,8 @@ export class AppState {
           // expected output route.
           this.broadcastDeviceSelection({
             kind: 'output',
-            requested: null,
-            actual: 'default',
+            requested: configuredOutput,
+            actual: configuredOutput || 'default',
             fellBack: false,
           });
         } catch (capErr) {
@@ -4242,7 +4245,8 @@ export class AppState {
         // B3: same defense for mic ctor throws (USB device disappears on open,
         // exclusive-mode steal). Outer try/catch only logged; user got no banner.
         try {
-          this.microphoneCapture = new MicrophoneCapture();
+          const configuredInput = SettingsManager.getInstance().get('selectedInputDevice') || null;
+          this.microphoneCapture = new MicrophoneCapture(configuredInput);
           this.wireMicCapture(this.microphoneCapture);
         } catch (capErr) {
           console.error('[Main] MicrophoneCapture construction failed:', capErr);
