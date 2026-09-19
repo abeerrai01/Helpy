@@ -119,7 +119,7 @@ export class SettingsWindowHelper {
 
         // Set parent to ensure it stays on top of the correct window
         const mainWin = this.windowHelper?.getMainWindow();
-        if (process.platform === 'darwin' && mainWin && !mainWin.isDestroyed()) {
+        if (mainWin && !mainWin.isDestroyed()) {
             this.settingsWindow.setParentWindow(mainWin);
         }
 
@@ -136,6 +136,12 @@ export class SettingsWindowHelper {
         }
         if (activate) this.settingsWindow.show(); else this.settingsWindow.showInactive();
         if (activate) this.settingsWindow.focus();
+
+        if (this.settingsWindow && !this.settingsWindow.isDestroyed()) {
+            try {
+                this.settingsWindow.moveTop();
+            } catch {}
+        }
 
         this.emitVisibilityChange(true);
 
@@ -173,9 +179,7 @@ export class SettingsWindowHelper {
 
     public closeWindow(): void {
         if (this.settingsWindow && !this.settingsWindow.isDestroyed()) {
-            if (process.platform === 'darwin') {
-                this.settingsWindow.setParentWindow(null);
-            }
+            this.settingsWindow.setParentWindow(null);
             this.settingsWindow.hide();
             this.emitVisibilityChange(false);
         }

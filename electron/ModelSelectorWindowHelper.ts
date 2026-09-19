@@ -60,7 +60,7 @@ export class ModelSelectorWindowHelper {
         const mainWin = this.windowHelper?.getMainWindow();
         const isOverlay = mainWin === this.windowHelper?.getOverlayWindow();
 
-        if (process.platform === "darwin" && mainWin && !mainWin.isDestroyed()) {
+        if (mainWin && !mainWin.isDestroyed()) {
             this.window.setParentWindow(mainWin);
         }
 
@@ -93,7 +93,6 @@ export class ModelSelectorWindowHelper {
         } else {
             this.overlayAnchor = null;
         }
-        this.windowHelper?.notifyOverlayPopover?.('model', this.overlayAnchor !== null);
 
         this.setContentProtection(this.contentProtection);
         if (this.window && !this.window.isDestroyed()) {
@@ -101,13 +100,19 @@ export class ModelSelectorWindowHelper {
         }
         if (activate) this.window.show(); else this.window.showInactive();
         if (activate) this.window.focus();
+
+        if (this.window && !this.window.isDestroyed()) {
+            try {
+                this.window.moveTop();
+            } catch {}
+        }
+
+        this.windowHelper?.notifyOverlayPopover?.('model', this.overlayAnchor !== null);
     }
 
     public hideWindow(): void {
         if (this.window && !this.window.isDestroyed()) {
-            if (process.platform === "darwin") {
-                this.window.setParentWindow(null);
-            }
+            this.window.setParentWindow(null);
             this.window.hide();
             // Do NOT call mainWin.focus() here — the model selector is a floating dropdown.
             // Explicitly focusing the main window steals OS focus from whatever the user
