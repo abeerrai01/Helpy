@@ -244,7 +244,7 @@ import {
 import { shouldDedupeManualSubmit } from '../lib/overlaySubmitDedup.mjs';
 import { decideScrollInterrupt } from '../lib/scrollInterruptDecision.mjs';
 import { decideStreamingHeightCommit } from '../lib/streamingHeightDecision.mjs';
-import { mergeTranscriptChunks } from '../lib/transcriptMerge.mjs';
+import { mergeTranscriptChunks, extractCurrentQuestion } from '../lib/transcriptMerge.mjs';
 import { createTranscriptTailWaiter } from '../lib/answerTailWait.mjs';
 import {
   applyWhatToAnswerNullFeedbackMessages,
@@ -6217,8 +6217,9 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         if (isRecordingRef.current && transcript.speaker === 'interviewer') {
           if (transcript.final) {
             const updated = mergeTranscriptChunks(recordingInterviewerSpeechRef.current, transcript.text);
-            recordingInterviewerSpeechRef.current = updated;
-            setRecordingInterviewerSpeech(updated);
+            const currentOnly = extractCurrentQuestion(updated);
+            recordingInterviewerSpeechRef.current = currentOnly;
+            setRecordingInterviewerSpeech(currentOnly);
             interviewerPartialRef.current = '';
             setInterviewerPartial('');
             flushRollingPartialPreview();
@@ -6245,6 +6246,19 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         // Ignore user mic transcripts when not recording
         // Only interviewer (system audio) transcripts should appear in chat
         if (transcript.speaker === 'user') {
+          const userText = (transcript.text || '').trim();
+          if (transcript.final && userText.length > 0) {
+            const isFiller = /^(yes|yeah|okay|ok|um+|uh+|right|mhm)\.?$/i.test(userText) || userText.split(/\s+/).length <= 1;
+            if (!isFiller) {
+              // Candidate answered verbally out loud; reset prior interviewer questions so next question starts fresh
+              recordingInterviewerSpeechRef.current = '';
+              setRecordingInterviewerSpeech('');
+              interviewerPartialRef.current = '';
+              setInterviewerPartial('');
+              setRollingTranscript('');
+              pendingRollingPartialRef.current = null;
+            }
+          }
           return; // Skip user mic input - only relevant when Answer button is active
         }
 
@@ -6302,6 +6316,12 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
             text: data.suggestion,
           },
         ]);
+        recordingInterviewerSpeechRef.current = '';
+        setRecordingInterviewerSpeech('');
+        interviewerPartialRef.current = '';
+        setInterviewerPartial('');
+        setRollingTranscript('');
+        pendingRollingPartialRef.current = null;
       }),
     );
 
@@ -6362,6 +6382,12 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         setIsProcessing(false);
         pinAnswerPanel();
         finalizeStreamingByIntent('what_to_answer', answerText);
+        recordingInterviewerSpeechRef.current = '';
+        setRecordingInterviewerSpeech('');
+        interviewerPartialRef.current = '';
+        setInterviewerPartial('');
+        setRollingTranscript('');
+        pendingRollingPartialRef.current = null;
       }),
     );
 
@@ -6729,11 +6755,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     const initialAudioSnapshot = pendingRollingPartialRef.current
       ? mergeRollingTranscriptPartial(rollingTranscript, pendingRollingPartialRef.current)
       : rollingTranscript;
-    const initialInterviewerSpeech = initialAudioSnapshot
-      .split('  ·  ')
-      .slice(-4)
-      .join('  ·  ')
-      .trim()
+    const initialInterviewerSpeech = extractCurrentQuestion(initialAudioSnapshot)
       .slice(-8192);
 
     if (currentAttachments.length > 0) {
@@ -6769,6 +6791,14 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
       ]);
     }
 
+    // Reset rolling transcript buffers so the captured question does not bleed into the next question
+    setRollingTranscript('');
+    pendingRollingPartialRef.current = null;
+    recordingInterviewerSpeechRef.current = '';
+    setRecordingInterviewerSpeech('');
+    interviewerPartialRef.current = '';
+    setInterviewerPartial('');
+
     // Create AI response placeholder AFTER user message so thinking dots + response
     // appear BELOW the question card (not above it)
     if (!directAssistEnabled) {
@@ -6797,18 +6827,13 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
               : message,
           ));
         }
-        // The rolling bar is already capped at 8 KiB. Keep the latest few STT
-        // segments so a question split by punctuation/finalization stays intact,
-        // while older meeting discussion cannot become the primary request.
+        // Extract only the current question from the rolling transcript
         const directTranscriptSnapshot = pendingRollingPartialRef.current
           ? mergeRollingTranscriptPartial(rollingTranscript, pendingRollingPartialRef.current)
           : rollingTranscript;
         const interviewerRequest = directTranscriptSnapshot
-          .split('  ·  ')
-          .slice(-4)
-          .join('  ·  ')
-          .trim()
-          .slice(-8192);
+          ? extractCurrentQuestion(directTranscriptSnapshot).slice(-8192)
+          : '';
         const hasScreenshots = currentAttachments.length > 0;
         const directWhatToSayPayload = buildDirectWhatToSayPayload({
           interviewerRequest,
@@ -7745,17 +7770,14 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         const currentAttachments = attachedContext;
         setAttachedContext([]);
 
-        const recentInterviewerSpeech = (
+        const rawInterviewerSpeech = (
           recordingInterviewerSpeechRef.current ||
           (pendingRollingPartialRef.current
             ? mergeRollingTranscriptPartial(rollingTranscript, pendingRollingPartialRef.current)
             : rollingTranscript
           )
-            .split('  ·  ')
-            .slice(-6)
-            .join(' ')
-            .trim()
-        ).trim();
+        );
+        const recentInterviewerSpeech = extractCurrentQuestion(rawInterviewerSpeech).trim();
 
         const question = mergeTranscriptChunks(
           voiceInputRef.current,
@@ -7777,6 +7799,12 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         recordingInterviewerSpeechRef.current = '';
         setInterviewerPartial('');
         interviewerPartialRef.current = '';
+        setRollingTranscript('');
+        pendingRollingPartialRef.current = null;
+        if (rollingPartialDebounceRef.current !== null) {
+          clearTimeout(rollingPartialDebounceRef.current);
+          rollingPartialDebounceRef.current = null;
+        }
 
         if (!question && currentAttachments.length === 0) {
           if ((sttUserStatus === 'failed' && sttUserError) || (sttInterviewerStatus === 'failed' && sttInterviewerError)) {
@@ -7984,14 +8012,11 @@ Provide only the answer, nothing else.`;
       voiceInputRef.current = '';
       setManualTranscript('');
       manualTranscriptRef.current = '';
-      const initialInterviewer = (pendingRollingPartialRef.current
+      const rawInterviewer = (pendingRollingPartialRef.current
         ? mergeRollingTranscriptPartial(rollingTranscript, pendingRollingPartialRef.current)
         : rollingTranscript
-      )
-        .split('  ·  ')
-        .slice(-6)
-        .join(' ')
-        .trim();
+      );
+      const initialInterviewer = extractCurrentQuestion(rawInterviewer).trim();
       recordingInterviewerSpeechRef.current = initialInterviewer;
       setRecordingInterviewerSpeech(initialInterviewer);
       interviewerPartialRef.current = '';
@@ -8043,6 +8068,16 @@ Provide only the answer, nothing else.`;
     // Clear inputs immediately
     setInputValue('');
     setAttachedContext([]);
+    setRecordingInterviewerSpeech('');
+    recordingInterviewerSpeechRef.current = '';
+    setInterviewerPartial('');
+    interviewerPartialRef.current = '';
+    setRollingTranscript('');
+    pendingRollingPartialRef.current = null;
+    if (rollingPartialDebounceRef.current !== null) {
+      clearTimeout(rollingPartialDebounceRef.current);
+      rollingPartialDebounceRef.current = null;
+    }
 
     // Seal any in-flight streaming rows from a previous turn before we
     // append the new user message + placeholder. Without this, the rAF

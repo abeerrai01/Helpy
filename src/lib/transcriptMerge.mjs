@@ -88,3 +88,94 @@ export function mergeTranscriptChunks(base, addition) {
 
   return baseNorm + ' ' + addNorm;
 }
+
+/**
+ * Leading pattern matching questions or prompts in interview settings.
+ */
+const QUESTION_STARTER_REGEX =
+  /^(why\s+(should\s+we|would\s+we|do\s+you|are\s+you|did\s+you|can\s+you|we\s+should|you\s+should)|what\s+(is|are|was|were|would|do|did|does|can|makes)|how\s+(do|did|does|would|can|is|are|will)|where\s+(do|did|does|would|can|is|are|will)|when\s+(did|do|does|would|was|were)|who\s+(was|were|is|are|do|did)|which\s+(one|part|approach|is|was)|can\s+you|could\s+you|would\s+you|do\s+you|did\s+you|have\s+you|are\s+you|tell\s+me\s+about|tell\s+me\s+more|walk\s+me\s+through|explain\s+to\s+me|explain\s+how|describe\s+a\s+time|describe\s+how|give\s+me\s+an\s+example|give\s+an\s+example|share\s+an\s+example)\b/i;
+
+/**
+ * Mid-sentence question patterns that signal the start of a distinct question.
+ */
+const MID_QUESTION_STARTER_REGEX =
+  /\b(why\s+(should\s+we|would\s+we|do\s+you|are\s+you|did\s+you|can\s+you|we\s+should|you\s+should)|what\s+(is|are|was|were|would|do|did|does|can|makes)|how\s+(do|did|does|would|can|is|are|will)|where\s+(do|did|does|would|can|is|are|will)|when\s+(did|do|does|would|was|were)|who\s+(was|were|is|are|do|did)|which\s+(one|part|approach|is|was)|can\s+you|could\s+you|would\s+you|tell\s+me\s+about|walk\s+me\s+through|explain\s+to\s+me|describe\s+a\s+time|give\s+me\s+an\s+example)\b/gi;
+
+function isQuestionLike(text) {
+  const t = String(text ?? '').trim();
+  if (!t) return false;
+  if (t.endsWith('?')) return true;
+  return QUESTION_STARTER_REGEX.test(t);
+}
+
+function isolateLastQuestionInString(text) {
+  const str = String(text ?? '').trim();
+  if (!str) return '';
+
+  // 1. Sentence-level check: if text contains punctuation delimiters (.?!),
+  // check if preceding sentence is a complete question and the last sentence is also a question.
+  const sentences = str.split(/(?<=[.?!])\s+/).map((s) => s.trim()).filter(Boolean);
+  if (sentences.length > 1) {
+    let lastQIndex = sentences.length - 1;
+    while (lastQIndex > 0) {
+      const prev = sentences[lastQIndex - 1];
+      const tail = sentences.slice(lastQIndex).join(' ');
+      if (isQuestionLike(prev) && isQuestionLike(tail)) {
+        break;
+      }
+      lastQIndex--;
+    }
+    if (lastQIndex > 0) {
+      return sentences.slice(lastQIndex).join(' ');
+    }
+  }
+
+  // 2. Unpunctuated check (e.g. "tell me about yourself why we should hire you")
+  const matches = [...str.matchAll(MID_QUESTION_STARTER_REGEX)];
+  if (matches.length > 1) {
+    for (let i = matches.length - 1; i >= 1; i--) {
+      const matchIndex = matches[i].index;
+      if (matchIndex != null && matchIndex > 0) {
+        const prefix = str.slice(0, matchIndex).trim();
+        if (isQuestionLike(prefix)) {
+          return str.slice(matchIndex).trim();
+        }
+      }
+    }
+  }
+
+  return str;
+}
+
+/**
+ * Extract only the current (latest) question from interviewer transcript text,
+ * dropping preceding questions (e.g. "tell me about yourself why we should hire you"
+ * -> "why we should hire you").
+ */
+export function extractCurrentQuestion(text) {
+  const raw = String(text ?? '').trim();
+  if (!raw) return '';
+
+  // 1. If text is separated by STT segment separator '  ·  '
+  if (raw.includes('  ·  ')) {
+    const segments = raw.split('  ·  ').map((s) => s.trim()).filter(Boolean);
+    if (segments.length === 0) return '';
+    if (segments.length === 1) return extractCurrentQuestion(segments[0]);
+
+    // Walk backwards from the last segment.
+    let startIndex = segments.length - 1;
+    while (startIndex > 0) {
+      const prev = segments[startIndex - 1];
+      const tail = segments.slice(startIndex).join(' ');
+      if (isQuestionLike(prev) && isQuestionLike(tail)) {
+        break;
+      }
+      startIndex--;
+    }
+    const currentSegments = segments.slice(startIndex);
+    const combined = currentSegments.join(' ');
+    return isolateLastQuestionInString(combined);
+  }
+
+  return isolateLastQuestionInString(raw);
+}
